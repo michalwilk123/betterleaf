@@ -65,13 +65,6 @@ export default function PdfViewer({ pdfUrl }: { pdfUrl?: string }) {
   }, [numPages, scale]);
 
   useEffect(() => {
-    pageRefs.current.clear();
-    setNumPages(0);
-    setRenderedPages(0);
-    setCurrentPage(1);
-  }, [pdfUrl]);
-
-  useEffect(() => {
     if (numPages === 0 || renderedPages >= numPages) return;
     const timeoutId = window.setTimeout(() => {
       setRenderedPages((prev) => Math.min(numPages, prev + PAGE_BATCH_SIZE));
@@ -139,7 +132,11 @@ export default function PdfViewer({ pdfUrl }: { pdfUrl?: string }) {
         ref={containerRef}
         className="flex-1 overflow-y-auto overflow-x-auto flex flex-col items-center gap-4 py-4 bg-muted/20"
       >
-        <Document file={pdfUrl} onLoadSuccess={onDocumentLoadSuccess}>
+        <Document
+          key={pdfUrl}
+          file={pdfUrl}
+          onLoadSuccess={onDocumentLoadSuccess}
+        >
           {Array.from({ length: renderedPages }, (_, i) => (
             <div
               key={i + 1}

@@ -1,11 +1,13 @@
 import asyncio
 import logging
 import os
+import secrets
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from queue_manager import Job, QueueFullError, QueueManager
@@ -22,6 +24,8 @@ API_SECRET = os.environ.get("LATEX_API_SECRET", "")
 if not API_SECRET:
     raise RuntimeError("LATEX_API_SECRET env var must be set")
 
+ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "https://betterleaf.micwilk.com")
+
 queue_manager = QueueManager()
 
 
@@ -32,14 +36,19 @@ async def lifespan(app: FastAPI):
     await queue_manager.stop()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[ALLOWED_ORIGIN],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     log.info("Incoming %s %s", request.method, request.url.path)
-    log.info("Content-Type: %s", request.headers.get("content-type", "(none)"))
-    log.info("Headers: %s", dict(request.headers))
     response = await call_next(request)
     log.info("Response status: %d for %s %s", response.status_code, request.method, request.url.path)
     return response
@@ -60,7 +69,7 @@ async def compile(
     halt_on_error: bool = Form(False),
 ):
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {API_SECRET}":
+    if not secrets.compare_digest(auth, f"Bearer {API_SECRET}"):
         return JSONResponse(
             status_code=401,
             content={"error": "unauthorized"},
