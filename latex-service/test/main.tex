@@ -1,0 +1,102 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{mathtools}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{graphicx}
+
+\geometry{margin=2.5cm}
+
+\newtheorem{theorem}{Theorem}
+
+\title{BetterLeaf \textemdash{} Compilation Test}
+\author{BetterLeaf Service}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This document exercises multiple \LaTeX{} packages and symbol sets to verify the compilation service handles real-world documents correctly.
+
+\section{Mathematics}
+
+The quadratic formula:
+\[
+  x = \frac{-b \pm \sqrt{b^{2} - 4ac}}{2a}, \quad a \neq 0
+\]
+
+Euler's identity and related constants:
+\[
+  e^{i\pi} + 1 = 0, \qquad
+  \varphi = \frac{1 + \sqrt{5}}{2} \approx 1.618\ldots
+\]
+
+A Gaussian integral:
+\[
+  \int_{-\infty}^{\infty} e^{-x^{2}} \, dx = \sqrt{\pi}
+\]
+
+A summation with binomial coefficients:
+\[
+  \sum_{k=0}^{n} \binom{n}{k} = 2^{n}
+\]
+
+Multiline alignment (using \texttt{mathtools}):
+\begin{align*}
+  \nabla \cdot \mathbf{E}  &= \frac{\rho}{\varepsilon_{0}}   &\quad& \text{(Gauss's law)}        \\
+  \nabla \times \mathbf{B} &= \mu_{0}\mathbf{J}
+    + \mu_{0}\varepsilon_{0}\frac{\partial \mathbf{E}}{\partial t}
+                            &\quad& \text{(Amp\`ere--Maxwell)}
+\end{align*}
+
+\begin{theorem}[Cantor]
+  For any set $S$, the power set $\mathcal{P}(S)$ satisfies
+  $\lvert \mathcal{P}(S) \rvert > \lvert S \rvert$.
+\end{theorem}
+
+\section{Greek \& Miscellaneous Symbols}
+
+\begin{center}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  Symbol & Command & Symbol & Command \\
+  \midrule
+  $\alpha$    & \verb|\alpha|    & $\Omega$      & \verb|\Omega|      \\
+  $\beta$     & \verb|\beta|     & $\Sigma$      & \verb|\Sigma|      \\
+  $\gamma$    & \verb|\gamma|    & $\Delta$      & \verb|\Delta|      \\
+  $\lambda$   & \verb|\lambda|   & $\Theta$      & \verb|\Theta|      \\
+  $\infty$    & \verb|\infty|    & $\forall$     & \verb|\forall|     \\
+  $\exists$   & \verb|\exists|   & $\varnothing$ & \verb|\varnothing| \\
+  $\in$       & \verb|\in|       & $\subseteq$   & \verb|\subseteq|   \\
+  $\implies$  & \verb|\implies|  & $\iff$        & \verb|\iff|        \\
+  $\langle x \rangle$ & \verb|\langle x \rangle| & $\|x\|$ & \verb!\|x\|! \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\section{Image}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.7\textwidth]{example.jpg}
+  \caption{A sample photograph included to test image handling.}
+  \label{fig:example}
+\end{figure}
+
+\section{Checklist}
+
+\begin{itemize}[label=\checkmark]
+  \item Zip upload works
+  \item \LaTeX{} compilation works
+  \item PDF response works
+  \item Multiple packages resolved
+  \item Symbols rendered correctly
+\end{itemize}
+
+\end{document}
