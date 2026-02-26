@@ -53,10 +53,8 @@ import {
 import { CreateFileModal } from "./_components/CreateFileModal";
 import { ShareModal } from "./_components/ShareModal";
 import { OptionsModal, loadEditorOptions, type EditorOptions, type CompileSettings } from "./_components/OptionsModal";
-import JSZip from "jszip";
 import { toast } from "sonner";
 import { uploadFilesParallel } from "@/lib/uploadUtils";
-import pLimit from "p-limit";
 
 const Editor = dynamic(
   () => import("@monaco-editor/react").then((m) => m.Editor),
@@ -126,48 +124,30 @@ function dirname(path: string) {
   return idx >= 0 ? path.slice(0, idx) : "";
 }
 
-async function buildZip(
+async function computeContentHash(
   files: Array<{ _id: string; name: string; content: string; storageUrl?: string | null }>,
   activeFileId: string | null,
   currentContent: string
-): Promise<{ blob: Blob; hash: string }> {
+): Promise<string> {
   const sortedFiles = [...files].sort((a, b) => a.name.localeCompare(b.name));
-  const zipEpochDate = new Date(0);
-  const zip = new JSZip();
   const hashInput: Array<[string, string]> = [];
-  // Pre-fetch all binary files in parallel
-  const limit = pLimit(6);
-  const binaryFiles = sortedFiles.filter((f) => f.storageUrl);
-  const fetched = await Promise.all(
-    binaryFiles.map((file) =>
-      limit(async () => {
-        const res = await fetch(file.storageUrl!);
-        return [file.name, new Uint8Array(await res.arrayBuffer())] as const;
-      })
-    )
-  );
-  const binaryData = new Map(fetched);
 
   for (const file of sortedFiles) {
     if (file.storageUrl) {
-      zip.file(file.name, binaryData.get(file.name)!, { binary: true, date: zipEpochDate });
       hashInput.push([file.name, file.storageUrl]);
     } else {
       const fileContent = file._id === activeFileId ? currentContent : file.content;
       hashInput.push([file.name, fileContent]);
-      zip.file(file.name, fileContent, { date: zipEpochDate });
     }
   }
 
-  const blob = await zip.generateAsync({ type: "blob" });
   const canonical = JSON.stringify(hashInput);
   const hashBuffer = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(canonical)
   );
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-  return { blob, hash };
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // --- Component ---
@@ -418,18 +398,10 @@ export default function EditorPage() {
     setFromCache(false);
 
     try {
-      const { blob: zipBlob, hash } = await buildZip(
-        files,
-        activeFileId,
-        content
-      );
+      const hash = await computeContentHash(files, activeFileId, content);
 
-      // Session-local cache hit.
-      if (
-        !forceRecompile &&
-        lastCompileRef.current &&
-        lastCompileRef.current.hash === hash
-      ) {
+      // Session-local cache hit
+      if (!forceRecompile && lastCompileRef.current?.hash === hash) {
         setPdfUrl(lastCompileRef.current.pdfUrl);
         setFromCache(true);
         setCompiling(false);
@@ -452,15 +424,12 @@ export default function EditorPage() {
         }
       }
 
-      // Cache miss (or forced) — compile
-      const formData = new FormData();
-      formData.append("file", zipBlob, "project.zip");
-      formData.append("entrypoint", entrypointFile.name);
-      formData.append("timeout", "120");
-      formData.append("compiler", project.compiler ?? "pdflatex");
-      formData.append("halt_on_error", String(project.haltOnError ?? false));
-
-      const res = await fetch("/api/compile", { method: "POST", body: formData });
+      // Cache miss (or forced) — compile via service
+      const res = await fetch("/api/compile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project._id, timeout: 120 }),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         console.error("[compile] error body:", JSON.stringify(body));

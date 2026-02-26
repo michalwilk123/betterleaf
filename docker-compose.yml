@@ -5,6 +5,8 @@ services:
       - "8417:8000"
     environment:
       - LATEX_API_SECRET=${LATEX_API_SECRET}
+      - CONVEX_URL=${CONVEX_URL}
+      - CONVEX_DEPLOY_KEY=${CONVEX_DEPLOY_KEY}
     tmpfs:
       - /tmp:exec
     healthcheck:

@@ -4,32 +4,24 @@ const LATEX_SERVICE_URL = process.env.LATEX_SERVICE_URL!;
 const LATEX_API_SECRET = process.env.LATEX_API_SECRET!;
 
 export async function POST(request: NextRequest) {
-  const incoming = await request.formData();
+  const body = await request.json();
+  const { projectId, timeout } = body as { projectId?: string; timeout?: number };
 
-  const file = incoming.get("file") as Blob | null;
-  const entrypoint = incoming.get("entrypoint") as string | null;
-  const timeout = incoming.get("timeout") as string | null;
-  const compiler = incoming.get("compiler") as string | null;
-  const haltOnError = incoming.get("halt_on_error") as string | null;
-
-  if (!file || !entrypoint) {
+  if (!projectId) {
     return NextResponse.json(
-      { error: "Missing required fields: file, entrypoint" },
+      { error: "Missing required field: projectId" },
       { status: 400 }
     );
   }
 
-  console.log("[compile/route] file size:", file.size, "entrypoint:", entrypoint, "timeout:", timeout, "compiler:", compiler, "halt_on_error:", haltOnError);
+  console.log("[compile/route] projectId:", projectId, "timeout:", timeout);
 
   const formData = new FormData();
-  formData.append("file", file, "project.zip");
-  formData.append("entrypoint", entrypoint);
-  formData.append("timeout", timeout ?? "120");
-  if (compiler) formData.append("compiler", compiler);
-  if (haltOnError) formData.append("halt_on_error", haltOnError);
+  formData.append("project_id", projectId);
+  formData.append("timeout", String(timeout ?? 120));
 
-  console.log("[compile/route] sending to LaTeX service:", `${LATEX_SERVICE_URL}/compile`);
-  const response = await fetch(`${LATEX_SERVICE_URL}/compile`, {
+  console.log("[compile/route] sending to LaTeX service:", `${LATEX_SERVICE_URL}/compile-project`);
+  const response = await fetch(`${LATEX_SERVICE_URL}/compile-project`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${LATEX_API_SECRET}`,
@@ -39,7 +31,7 @@ export async function POST(request: NextRequest) {
   });
 
   const contentType = response.headers.get("content-type") || "";
-  console.log("[compile/route] LaTeX service response:", response.status, response.statusText, "contentType:", contentType, "redirected:", response.redirected);
+  console.log("[compile/route] LaTeX service response:", response.status, response.statusText, "contentType:", contentType);
 
   if (contentType.includes("application/pdf")) {
     const pdfBytes = await response.arrayBuffer();
@@ -54,7 +46,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Forward error JSON
-  const body = await response.json();
-  console.error("[compile/route] error from LaTeX service:", JSON.stringify(body).slice(0, 500));
-  return NextResponse.json(body, { status: response.status });
+  const errorBody = await response.json();
+  console.error("[compile/route] error from LaTeX service:", JSON.stringify(errorBody).slice(0, 500));
+  return NextResponse.json(errorBody, { status: response.status });
 }

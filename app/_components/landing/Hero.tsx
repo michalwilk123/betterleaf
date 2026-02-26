@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { TerminalBlock } from "./TerminalBlock";
 import { ScreenshotMockup } from "./ScreenshotMockup";
 
@@ -16,10 +15,6 @@ export function Hero() {
       <div className="relative mx-auto max-w-6xl w-full px-6 py-32 grid lg:grid-cols-2 gap-16 items-center">
         {/* Left — copy */}
         <div className="animate-fade-up">
-          <Badge className="mb-6 bg-primary/10 text-primary border-primary/20 hover:bg-primary/15">
-            Self-hosted &middot; Open Source
-          </Badge>
-
           <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-white leading-[1.08]">
             Your thesis deserves
             <br />
@@ -40,8 +35,8 @@ export function Hero() {
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>
-            <Button asChild variant="outline" size="lg" className="text-base border-white/10 text-white/70 hover:bg-white/5 hover:text-white">
-              <a href="https://github.com" target="_blank" rel="noopener noreferrer">
+            <Button asChild variant="outline" size="lg" className="text-base border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white">
+              <a href="https://github.com/michalwilk123/betterleaf" target="_blank" rel="noopener noreferrer">
                 View on GitHub
               </a>
             </Button>

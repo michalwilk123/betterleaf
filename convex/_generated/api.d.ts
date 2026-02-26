@@ -15,6 +15,7 @@ import type * as http from "../http.js";
 import type * as lib_limits from "../lib/limits.js";
 import type * as members from "../members.js";
 import type * as projects from "../projects.js";
+import type * as service from "../service.js";
 
 import type {
   ApiFromModules,
@@ -30,6 +31,7 @@ declare const fullApi: ApiFromModules<{
   "lib/limits": typeof lib_limits;
   members: typeof members;
   projects: typeof projects;
+  service: typeof service;
 }>;
 
 /**

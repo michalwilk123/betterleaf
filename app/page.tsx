@@ -64,9 +64,12 @@ export default function LandingPage() {
             <Leaf className="h-4 w-4" />
             <span>betterleaf</span>
           </div>
-          <p className="text-white/30 text-sm">
-            Open source LaTeX collaboration.
-          </p>
+          <div className="flex items-center gap-4 text-white/30 text-sm">
+            <p>Open source LaTeX collaboration.</p>
+            <a href="https://micwilk.com" target="_blank" rel="noopener noreferrer" className="hover:text-white/50 transition-colors">
+              Blog
+            </a>
+          </div>
         </div>
       </footer>
     </main>

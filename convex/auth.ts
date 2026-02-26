@@ -17,7 +17,11 @@ export const createAuth = (ctx: any) =>
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
       },
     },
-    trustedOrigins: [process.env.SITE_URL!],
+    trustedOrigins: [
+      process.env.SITE_URL!,
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+    ],
     plugins: [
       convex({ authConfig }),
       crossDomain({ siteUrl: process.env.SITE_URL! }),
