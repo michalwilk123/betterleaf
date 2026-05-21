@@ -15,7 +15,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import type { Monaco } from "@monaco-editor/react";
-import { useQuery, useMutation, useConvex } from "convex/react";
+import { useAction, useQuery, useMutation, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
@@ -157,6 +157,7 @@ export default function EditorPage() {
   const convex = useConvex();
 
   const project = useQuery(api.projects.get, { shortId });
+  const projectIsOwner = project?.accessLevel === "owner";
   const files = useQuery(
     api.files.listByProject,
     project ? { projectId: project._id } : "skip"
@@ -173,6 +174,8 @@ export default function EditorPage() {
   const generateFileUploadUrl = useMutation(api.files.generateUploadUrl);
   const createManyText = useMutation(api.files.createManyText);
   const createManyBinary = useMutation(api.files.createManyBinary);
+  const syncFromGithub = useAction(api.github.syncFromGithub);
+  const commitProject = useAction(api.github.commitProject);
 
   // Project name (editable)
   const [projectName, setProjectName] = useState("");
@@ -189,6 +192,7 @@ export default function EditorPage() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [compiling, setCompiling] = useState(false);
+  const [syncingGithub, setSyncingGithub] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | undefined>(undefined);
   const [fromCache, setFromCache] = useState(false);
   const lastCompileRef = useRef<{ hash: string; pdfUrl: string } | null>(null);
@@ -238,7 +242,7 @@ export default function EditorPage() {
 
   // Auto-open first file
   useEffect(() => {
-    if (files && files.length > 0 && !activeFileId) {
+    if (files && files.length > 0 && (!activeFileId || !files.some((f) => f._id === activeFileId))) {
       const mainTex = files.find((f) => f.name === "main.tex");
       const firstFile = mainTex ?? files[0];
       setActiveFileId(firstFile._id);
@@ -246,6 +250,36 @@ export default function EditorPage() {
       setDirty(false);
     }
   }, [files, activeFileId]);
+
+  const compileAfterGithubSyncRef = useRef(false);
+
+  useEffect(() => {
+    if (!project?.githubRepoOwner || !projectIsOwner) return;
+    let cancelled = false;
+    const projectId = project._id;
+
+    async function syncLatest() {
+      setSyncingGithub(true);
+      try {
+        const result = await syncFromGithub({ projectId });
+        if (!cancelled && result.updated) {
+          compileAfterGithubSyncRef.current = true;
+          toast.success("Pulled latest GitHub changes");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : "Failed to sync GitHub project");
+        }
+      } finally {
+        if (!cancelled) setSyncingGithub(false);
+      }
+    }
+
+    syncLatest();
+    return () => {
+      cancelled = true;
+    };
+  }, [project?._id, project?.githubRepoOwner, projectIsOwner, syncFromGithub]);
 
   // Focus name input when editing
   useEffect(() => {
@@ -382,13 +416,20 @@ export default function EditorPage() {
     setSaving(true);
     try {
       await updateFileContent({ fileId: activeFileId, content });
+      if (project?.githubRepoOwner && project.accessLevel === "owner") {
+        const result = await commitProject({
+          projectId: project._id,
+          message: `Update ${activeFileName || "project files"}`,
+        });
+        if (result.committed) toast.success("Committed to GitHub");
+      }
       setDirty(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save file");
     } finally {
       setSaving(false);
     }
-  }, [activeFileId, content, updateFileContent]);
+  }, [activeFileId, activeFileName, content, project, updateFileContent, commitProject]);
 
   const compile = useCallback(async (forceRecompile = false) => {
     if (!files || files.length === 0 || !entrypointFile || !project) return;
@@ -489,6 +530,14 @@ export default function EditorPage() {
     generateCompilationUploadUrl,
     saveCompilation,
   ]);
+
+  useEffect(() => {
+    if (!compileAfterGithubSyncRef.current || !files || files.length === 0 || !entrypointFile) {
+      return;
+    }
+    compileAfterGithubSyncRef.current = false;
+    compile(true);
+  }, [files, entrypointFile, compile]);
 
   const handleUpload = useCallback(
     async (selectedFiles: FileList | File[]) => {
@@ -837,6 +886,11 @@ export default function EditorPage() {
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               Cached
             </span>
+          )}
+          {project.githubRepoOwner && (
+            <Badge variant="outline" className="border-slate-300 bg-slate-50 text-slate-700">
+              {syncingGithub ? "Syncing GitHub..." : `${project.githubRepoOwner}/${project.githubRepoName}`}
+            </Badge>
           )}
           {isOwner && (
             <Button

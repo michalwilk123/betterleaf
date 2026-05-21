@@ -2,12 +2,12 @@
 
 import { useState, useRef, useCallback, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Upload, FileText, Folder, FolderOpen, Loader2, X } from "lucide-react";
+import { Github, Upload, FileText, Folder, FolderOpen, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import JSZip from "jszip";
 import { uploadFilesParallel } from "@/lib/uploadUtils";
@@ -127,11 +127,17 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [files, setFiles] = useState<UploadItem[]>([]);
+  const [mode, setMode] = useState<"local" | "github">("local");
+  const [repo, setRepo] = useState("michalwilk123/Creating_applications_with_AI_coding_models");
+  const [branch, setBranch] = useState("main");
+  const [repoPath, setRepoPath] = useState("");
   const [creating, setCreating] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ processed: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const githubStatus = useQuery(api.github.status);
   const createProject = useMutation(api.projects.create);
+  const createSyncedProject = useAction(api.github.createSyncedProject);
   const generateFileUploadUrl = useMutation(api.files.generateUploadUrl);
   const createManyText = useMutation(api.files.createManyText);
   const createManyBinary = useMutation(api.files.createManyBinary);
@@ -171,6 +177,19 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
   const handleConfirm = async () => {
     setCreating(true);
     try {
+      if (mode === "github") {
+        const result = await createSyncedProject({
+          repo,
+          branch,
+          path: repoPath.trim() || undefined,
+          name: name.trim() || undefined,
+        });
+        onClose();
+        setName("");
+        router.push(`/projects/${result.shortId}`);
+        return;
+      }
+
       const result = await createProject({
         name: name.trim() || undefined,
         skipDefaultFile: files.length > 0 ? true : undefined,
@@ -232,6 +251,29 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
   return (
     <Modal open={open} onClose={handleClose} title="New Project">
       <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-2 gap-2 rounded-md bg-muted/50 p-1">
+          <button
+            type="button"
+            onClick={() => setMode("local")}
+            className={`rounded px-3 py-2 text-sm font-medium ${
+              mode === "local" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground"
+            }`}
+            disabled={creating}
+          >
+            Local
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("github")}
+            className={`rounded px-3 py-2 text-sm font-medium ${
+              mode === "github" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground"
+            }`}
+            disabled={creating}
+          >
+            GitHub Sync
+          </button>
+        </div>
+
         <div>
           <label className="text-sm font-medium text-foreground mb-1.5 block">
             Project Name
@@ -245,6 +287,60 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
           />
         </div>
 
+        {mode === "github" ? (
+          <div className="flex flex-col gap-3">
+            <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm">
+              {githubStatus?.connected ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Github className="h-4 w-4" />
+                  Connected as <span className="font-medium text-foreground">{githubStatus.login}</span>
+                </div>
+              ) : (
+                <Button asChild variant="outline" className="w-full gap-2">
+                  <a href="/api/github/connect">
+                    <Github className="h-4 w-4" />
+                    Connect GitHub
+                  </a>
+                </Button>
+              )}
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">
+                Repository
+              </label>
+              <Input
+                placeholder="owner/repo"
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                disabled={creating}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                  Branch
+                </label>
+                <Input
+                  placeholder="main"
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                  disabled={creating}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                  Path
+                </label>
+                <Input
+                  placeholder="optional/folder"
+                  value={repoPath}
+                  onChange={(e) => setRepoPath(e.target.value)}
+                  disabled={creating}
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
         <div>
           <label className="text-sm font-medium text-foreground mb-1.5 block">
             Upload Files
@@ -270,8 +366,9 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
             className="hidden"
           />
         </div>
+        )}
 
-        {files.length > 0 && (
+        {mode === "local" && files.length > 0 && (
           <div className="max-h-40 overflow-y-auto rounded-md border border-border/60 bg-muted/30 p-2">
             <div className="flex flex-col gap-1">
               {renderTreeNode(buildFileTree(files), 0, removeFile)}
@@ -295,7 +392,7 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
 
         <Button
           onClick={handleConfirm}
-          disabled={creating}
+          disabled={creating || (mode === "github" && !githubStatus?.connected)}
           className="w-full gap-2"
         >
           {creating && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -303,7 +400,9 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
             ? uploadProgress
               ? "Uploading files..."
               : "Creating..."
-            : "Create Project"}
+            : mode === "github"
+              ? "Create Synced Project"
+              : "Create Project"}
         </Button>
       </div>
     </Modal>

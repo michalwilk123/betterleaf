@@ -32,6 +32,29 @@ async function checkAccess(
   throw new Error("Not authorized");
 }
 
+export const getLatestPdfUrl = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    try {
+      await checkAccess(ctx, projectId);
+    } catch {
+      return null;
+    }
+
+    const latest = await ctx.db
+      .query("compilationOutputs")
+      .withIndex("by_projectId", (q) => q.eq("projectId", projectId))
+      .order("desc")
+      .first();
+    if (!latest) return null;
+
+    const pdfUrl = await ctx.storage.getUrl(latest.storageId);
+    if (!pdfUrl) return null;
+
+    return { pdfUrl, createdAt: latest.createdAt };
+  },
+});
+
 export const getByHash = query({
   args: { projectId: v.id("projects"), zipHash: v.string() },
   handler: async (ctx, { projectId, zipHash }) => {

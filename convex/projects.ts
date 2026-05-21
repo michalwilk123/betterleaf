@@ -1,8 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { nanoid } from "nanoid";
 import { authComponent } from "./auth";
-import type { Id } from "./_generated/dataModel";
 import { checkProjectCount } from "./lib/limits";
 
 const DEFAULT_MAIN_TEX = `\\documentclass{article}
@@ -47,14 +47,29 @@ export const list = query({
         .map((id) => ctx.db.get(id))
     );
 
-    const allProjects = [
+    const baseList = [
       ...ownedByMe.map((p) => ({ ...p, isOwned: true })),
       ...sharedProjects
         .filter((p): p is NonNullable<typeof p> => p !== null)
         .map((p) => ({ ...p, isOwned: false })),
     ];
 
-    return allProjects.sort((a, b) => b.updatedAt - a.updatedAt);
+    const withCompileMeta = await Promise.all(
+      baseList.map(async (p) => {
+        const latest = await ctx.db
+          .query("compilationOutputs")
+          .withIndex("by_projectId", (q) => q.eq("projectId", p._id))
+          .order("desc")
+          .first();
+        return {
+          ...p,
+          hasCompiledOutput: latest !== null,
+          lastCompiledAt: latest ? latest.createdAt : null,
+        };
+      })
+    );
+
+    return withCompileMeta.sort((a, b) => b.updatedAt - a.updatedAt);
   },
 });
 
@@ -105,8 +120,27 @@ export const get = query({
 });
 
 export const create = mutation({
-  args: { name: v.optional(v.string()), skipDefaultFile: v.optional(v.boolean()) },
-  handler: async (ctx, { name, skipDefaultFile }) => {
+  args: {
+    name: v.optional(v.string()),
+    skipDefaultFile: v.optional(v.boolean()),
+    githubRepoOwner: v.optional(v.string()),
+    githubRepoName: v.optional(v.string()),
+    githubBranch: v.optional(v.string()),
+    githubPath: v.optional(v.string()),
+    githubLastCommitSha: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    {
+      name,
+      skipDefaultFile,
+      githubRepoOwner,
+      githubRepoName,
+      githubBranch,
+      githubPath,
+      githubLastCommitSha,
+    }
+  ) => {
     const user = await authComponent.getAuthUser(ctx as any);
     if (!user) throw new Error("Not authenticated");
 
@@ -120,6 +154,11 @@ export const create = mutation({
       shortId,
       name: projectName,
       ownerId: user._id as string,
+      githubRepoOwner,
+      githubRepoName,
+      githubBranch,
+      githubPath,
+      githubLastCommitSha,
       createdAt: now,
       updatedAt: now,
     });
@@ -137,6 +176,17 @@ export const create = mutation({
     }
 
     return { shortId, projectId };
+  },
+});
+
+export const getByIdForOwner = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const user = await authComponent.getAuthUser(ctx as any);
+    if (!user) throw new Error("Not authenticated");
+    const project = await ctx.db.get(projectId);
+    if (!project || project.ownerId !== (user._id as string)) return null;
+    return project;
   },
 });
 

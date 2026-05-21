@@ -7,6 +7,11 @@ export default defineSchema({
     name: v.string(),
     ownerId: v.string(),
     entrypointFileId: v.optional(v.id("projectFiles")),
+    githubRepoOwner: v.optional(v.string()),
+    githubRepoName: v.optional(v.string()),
+    githubBranch: v.optional(v.string()),
+    githubPath: v.optional(v.string()),
+    githubLastCommitSha: v.optional(v.string()),
     compiler: v.optional(v.union(v.literal("pdflatex"), v.literal("xelatex"), v.literal("lualatex"))),
     haltOnError: v.optional(v.boolean()),
     publicAccess: v.optional(v.union(v.literal("none"), v.literal("read"), v.literal("edit"))),
@@ -48,4 +53,14 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_projectId", ["projectId"])
     .index("by_email", ["email"]),
+
+  githubConnections: defineTable({
+    userId: v.string(),
+    githubUserId: v.number(),
+    login: v.string(),
+    accessToken: v.string(),
+    scope: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_userId", ["userId"]),
 });

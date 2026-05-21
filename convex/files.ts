@@ -227,6 +227,58 @@ export const createManyBinary = mutation({
   },
 });
 
+export const replaceProjectTextFiles = mutation({
+  args: {
+    projectId: v.id("projects"),
+    files: v.array(v.object({ name: v.string(), content: v.string() })),
+    githubLastCommitSha: v.string(),
+  },
+  handler: async (ctx, { projectId, files, githubLastCommitSha }) => {
+    const { project } = await checkAccess(ctx, projectId, true);
+    const totalBytes = files.reduce(
+      (sum, f) => sum + new TextEncoder().encode(f.content).byteLength,
+      0
+    );
+    await checkProjectSize(ctx, projectId, totalBytes);
+
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("projectFiles")
+      .withIndex("by_projectId", (q) => q.eq("projectId", projectId))
+      .collect();
+
+    for (const file of existing) {
+      if (file.storageId) await ctx.storage.delete(file.storageId);
+      await ctx.db.delete(file._id);
+    }
+
+    let entrypointFileId: Id<"projectFiles"> | undefined;
+    for (const file of files) {
+      const fileId = await ctx.db.insert("projectFiles", {
+        projectId,
+        name: file.name,
+        content: file.content,
+        createdAt: now,
+        updatedAt: now,
+      });
+      if (
+        file.name === "main.tex" ||
+        (!entrypointFileId && file.name.endsWith(".tex") && !file.name.includes("/"))
+      ) {
+        entrypointFileId = fileId;
+      }
+    }
+
+    await ctx.db.patch(projectId, {
+      entrypointFileId,
+      githubLastCommitSha,
+      updatedAt: now,
+    });
+
+    return { project };
+  },
+});
+
 export const remove = mutation({
   args: { fileId: v.id("projectFiles") },
   handler: async (ctx, { fileId }) => {

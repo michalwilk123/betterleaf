@@ -11,6 +11,8 @@
 import type * as auth from "../auth.js";
 import type * as compilations from "../compilations.js";
 import type * as files from "../files.js";
+import type * as github from "../github.js";
+import type * as githubInternal from "../githubInternal.js";
 import type * as http from "../http.js";
 import type * as lib_limits from "../lib/limits.js";
 import type * as members from "../members.js";
@@ -27,6 +29,8 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   compilations: typeof compilations;
   files: typeof files;
+  github: typeof github;
+  githubInternal: typeof githubInternal;
   http: typeof http;
   "lib/limits": typeof lib_limits;
   members: typeof members;
