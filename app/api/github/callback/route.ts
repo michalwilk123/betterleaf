@@ -6,9 +6,8 @@ export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const expectedState = request.cookies.get("github_oauth_state")?.value;
 
-  if (!code || !state || state !== expectedState) {
+  if (!code || !state) {
     return NextResponse.redirect(new URL("/projects?github=error", request.url));
   }
 
@@ -16,12 +15,6 @@ export async function GET(request: NextRequest) {
   const clientSecret = process.env.GITHUB_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
     return NextResponse.json({ error: "Missing GitHub OAuth configuration" }, { status: 500 });
-  }
-
-  const { getToken } = await import("@/lib/auth-server");
-  const token = await getToken();
-  if (!token) {
-    return NextResponse.redirect(new URL("/auth/login", request.url));
   }
 
   const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
@@ -52,8 +45,8 @@ export async function GET(request: NextRequest) {
   }
 
   const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-  convex.setAuth(token);
-  await convex.mutation(api.github.saveConnection, {
+  await convex.mutation(api.github.consumeOAuthStateAndSaveConnection, {
+    state,
     githubUserId: githubUser.id,
     login: githubUser.login,
     accessToken: tokenBody.access_token,
@@ -61,6 +54,5 @@ export async function GET(request: NextRequest) {
   });
 
   const response = NextResponse.redirect(new URL("/projects?github=connected", request.url));
-  response.cookies.delete("github_oauth_state");
   return response;
 }

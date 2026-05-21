@@ -90,6 +90,66 @@ export const saveConnection = mutation({
   },
 });
 
+export const createOAuthState = mutation({
+  args: { state: v.string() },
+  handler: async (ctx, { state }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const user = await authComponent.getAuthUser(ctx as any);
+    if (!user) throw new Error("Not authenticated");
+
+    const now = Date.now();
+    await ctx.db.insert("githubOAuthStates", {
+      state,
+      userId: user._id as string,
+      createdAt: now,
+      expiresAt: now + 10 * 60 * 1000,
+    });
+  },
+});
+
+export const consumeOAuthStateAndSaveConnection = mutation({
+  args: {
+    state: v.string(),
+    githubUserId: v.number(),
+    login: v.string(),
+    accessToken: v.string(),
+    scope: v.optional(v.string()),
+  },
+  handler: async (ctx, { state, githubUserId, login, accessToken, scope }) => {
+    const oauthState = await ctx.db
+      .query("githubOAuthStates")
+      .withIndex("by_state", (q) => q.eq("state", state))
+      .unique();
+    if (!oauthState || oauthState.expiresAt < Date.now()) {
+      throw new Error("Invalid GitHub authorization state");
+    }
+
+    await ctx.db.delete(oauthState._id);
+
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("githubConnections")
+      .withIndex("by_userId", (q) => q.eq("userId", oauthState.userId))
+      .unique();
+    const connection = {
+      githubUserId,
+      login,
+      accessToken,
+      scope,
+      updatedAt: now,
+    };
+    if (existing) {
+      await ctx.db.patch(existing._id, connection);
+      return;
+    }
+    await ctx.db.insert("githubConnections", {
+      userId: oauthState.userId,
+      ...connection,
+      createdAt: now,
+    });
+  },
+});
+
 export const createSyncedProject = action({
   args: {
     repo: v.string(),

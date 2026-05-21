@@ -136,6 +136,7 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const githubStatus = useQuery(api.github.status);
+  const createOAuthState = useMutation(api.github.createOAuthState);
   const createProject = useMutation(api.projects.create);
   const createSyncedProject = useAction(api.github.createSyncedProject);
   const generateFileUploadUrl = useMutation(api.files.generateUploadUrl);
@@ -233,6 +234,18 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
     }
   };
 
+  const connectGithub = async () => {
+    try {
+      const stateBytes = new Uint8Array(24);
+      crypto.getRandomValues(stateBytes);
+      const state = Array.from(stateBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+      await createOAuthState({ state });
+      window.location.href = `/api/github/connect?state=${encodeURIComponent(state)}`;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to start GitHub authorization");
+    }
+  };
+
   const removeFile = (path: string) => {
     setFiles((prev) => {
       const index = prev.findIndex((item) => item.path === path);
@@ -296,11 +309,14 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
                   Connected as <span className="font-medium text-foreground">{githubStatus.login}</span>
                 </div>
               ) : (
-                <Button asChild variant="outline" className="w-full gap-2">
-                  <a href="/api/github/connect">
-                    <Github className="h-4 w-4" />
-                    Connect GitHub
-                  </a>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={connectGithub}
+                >
+                  <Github className="h-4 w-4" />
+                  Connect GitHub
                 </Button>
               )}
             </div>

@@ -1,13 +1,16 @@
-import { NextResponse } from "next/server";
-import { randomBytes } from "crypto";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const clientId = process.env.GITHUB_CLIENT_ID;
   if (!clientId) {
     return NextResponse.json({ error: "Missing GITHUB_CLIENT_ID" }, { status: 500 });
   }
 
-  const state = randomBytes(24).toString("hex");
+  const state = new URL(request.url).searchParams.get("state");
+  if (!state) {
+    return NextResponse.redirect(new URL("/projects?github=error", request.url));
+  }
+
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/github/callback`,
@@ -15,13 +18,5 @@ export async function GET() {
     state,
   });
 
-  const response = NextResponse.redirect(`https://github.com/login/oauth/authorize?${params}`);
-  response.cookies.set("github_oauth_state", state, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 10 * 60,
-  });
-  return response;
+  return NextResponse.redirect(`https://github.com/login/oauth/authorize?${params}`);
 }
