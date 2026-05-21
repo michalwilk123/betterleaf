@@ -3,6 +3,7 @@ import { action, mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { authComponent } from "./auth";
 import type { Id } from "./_generated/dataModel";
+import { importPKCS8, SignJWT } from "jose";
 
 type GithubFile = {
   path: string;
@@ -38,6 +39,56 @@ async function githubFetch(token: string, url: string, init?: RequestInit) {
     throw new Error(`GitHub request failed (${res.status}): ${body.slice(0, 300)}`);
   }
   return res.json();
+}
+
+function getGithubAppPrivateKey() {
+  const encodedKey = process.env.GITHUB_APP_PRIVATE_KEY_B64;
+  if (!encodedKey) throw new Error("Missing GITHUB_APP_PRIVATE_KEY_B64");
+  return atob(encodedKey);
+}
+
+async function createGithubAppJwt() {
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  if (!clientId) throw new Error("Missing GITHUB_CLIENT_ID");
+
+  const privateKey = await importPKCS8(getGithubAppPrivateKey(), "RS256");
+  const now = Math.floor(Date.now() / 1000);
+  return await new SignJWT({})
+    .setProtectedHeader({ alg: "RS256" })
+    .setIssuedAt(now - 60)
+    .setExpirationTime(now + 9 * 60)
+    .setIssuer(clientId)
+    .sign(privateKey);
+}
+
+async function getInstallationTokenForRepo(owner: string, repo: string) {
+  const appJwt = await createGithubAppJwt();
+  const installationResponse = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/installation`,
+    {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${appJwt}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    }
+  );
+  if (installationResponse.status === 404) {
+    throw new Error(
+      `Install the BetterLeaf GitHub App on ${owner}/${repo} before creating a synced project`
+    );
+  }
+  if (!installationResponse.ok) {
+    const body = await installationResponse.text();
+    throw new Error(`GitHub App installation lookup failed (${installationResponse.status}): ${body.slice(0, 300)}`);
+  }
+  const installation = await installationResponse.json();
+  const token = await githubFetch(
+    appJwt,
+    `https://api.github.com/app/installations/${installation.id}/access_tokens`,
+    { method: "POST" }
+  );
+  return token.token as string;
 }
 
 function decodeBase64(content: string) {
@@ -169,9 +220,10 @@ export const createSyncedProject = action({
     const repo = normalizeRepo(args.repo);
     const rootPath = normalizePath(args.path);
     const branch = args.branch.trim();
-    const latestCommit = await getBranchCommit(connection.accessToken, repo.owner, repo.name, branch);
+    const installationToken = await getInstallationTokenForRepo(repo.owner, repo.name);
+    const latestCommit = await getBranchCommit(installationToken, repo.owner, repo.name, branch);
     const files = await readGithubTextFiles(
-      connection.accessToken,
+      installationToken,
       repo.owner,
       repo.name,
       branch,
@@ -213,8 +265,12 @@ export const syncFromGithub = action({
     });
     if (!connection) throw new Error("Connect GitHub before syncing this project");
 
+    const installationToken = await getInstallationTokenForRepo(
+      project.githubRepoOwner,
+      project.githubRepoName
+    );
     const latestCommit = await getBranchCommit(
-      connection.accessToken,
+      installationToken,
       project.githubRepoOwner,
       project.githubRepoName,
       project.githubBranch
@@ -222,7 +278,7 @@ export const syncFromGithub = action({
     if (latestCommit === project.githubLastCommitSha) return { updated: false };
 
     const files = await readGithubTextFiles(
-      connection.accessToken,
+      installationToken,
       project.githubRepoOwner,
       project.githubRepoName,
       project.githubBranch,
@@ -254,8 +310,12 @@ export const commitProject = action({
     if (!connection) throw new Error("Connect GitHub before committing this project");
 
     const files = await ctx.runQuery(api.files.listByProject, { projectId });
+    const installationToken = await getInstallationTokenForRepo(
+      project.githubRepoOwner,
+      project.githubRepoName
+    );
     const commitSha = await commitFiles(
-      connection.accessToken,
+      installationToken,
       project.githubRepoOwner,
       project.githubRepoName,
       project.githubBranch,
