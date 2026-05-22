@@ -111,6 +111,23 @@ export const status = query({
   },
 });
 
+export const disconnect = mutation({
+  args: {},
+  handler: async (ctx) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const user = await authComponent.getAuthUser(ctx as any);
+    if (!user) throw new Error("Not authenticated");
+    const userId = user._id as string;
+    const existing = await ctx.db
+      .query("githubConnections")
+      .withIndex("by_userId", (q) => q.eq("userId", userId))
+      .unique();
+    if (existing) {
+      await ctx.db.delete(existing._id);
+    }
+  },
+});
+
 export const saveConnection = mutation({
   args: {
     githubUserId: v.number(),

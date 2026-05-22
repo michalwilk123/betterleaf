@@ -137,6 +137,7 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
 
   const githubStatus = useQuery(api.github.status);
   const createOAuthState = useMutation(api.github.createOAuthState);
+  const disconnectGithub = useMutation(api.github.disconnect);
   const createProject = useMutation(api.projects.create);
   const createSyncedProject = useAction(api.github.createSyncedProject);
   const generateFileUploadUrl = useMutation(api.files.generateUploadUrl);
@@ -302,12 +303,44 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
 
         {mode === "github" ? (
           <div className="flex flex-col gap-3">
-            <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm">
+            <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm flex flex-col gap-2">
               {githubStatus?.connected ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Github className="h-4 w-4" />
-                  Connected as <span className="font-medium text-foreground">{githubStatus.login}</span>
-                </div>
+                <>
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Github className="h-4 w-4" />
+                    Connected as <span className="font-medium text-foreground">{githubStatus.login}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={connectGithub}
+                    >
+                      <Github className="h-4 w-4" />
+                      Install / manage app
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={async () => {
+                        try {
+                          await disconnectGithub({});
+                          toast.success("Disconnected from GitHub");
+                        } catch (error) {
+                          toast.error(
+                            error instanceof Error ? error.message : "Failed to disconnect"
+                          );
+                        }
+                      }}
+                    >
+                      Disconnect
+                    </Button>
+                  </div>
+                </>
               ) : (
                 <Button
                   type="button"
