@@ -6,9 +6,29 @@ export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
+  const installationId = url.searchParams.get("installation_id");
 
-  if (!code || !state) {
+  if (!state) {
     return NextResponse.redirect(new URL("/projects?github=error", request.url));
+  }
+
+  // App was installed without OAuth-during-install enabled: fall back to OAuth so we can identify the user.
+  if (!code) {
+    if (!installationId) {
+      return NextResponse.redirect(new URL("/projects?github=error", request.url));
+    }
+    const clientId = process.env.GITHUB_CLIENT_ID;
+    if (!clientId) {
+      return NextResponse.json({ error: "Missing GITHUB_CLIENT_ID" }, { status: 500 });
+    }
+    const oauthUrl = new URL("https://github.com/login/oauth/authorize");
+    oauthUrl.searchParams.set("client_id", clientId);
+    oauthUrl.searchParams.set(
+      "redirect_uri",
+      `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/github/callback`
+    );
+    oauthUrl.searchParams.set("state", state);
+    return NextResponse.redirect(oauthUrl.toString());
   }
 
   const clientId = process.env.GITHUB_CLIENT_ID;
