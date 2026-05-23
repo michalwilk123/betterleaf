@@ -99,6 +99,8 @@ export async function GET(request: NextRequest) {
     login: githubUser.login,
     githubUserId: githubUser.id,
   });
-  const response = NextResponse.redirect(new URL("/projects?github=connected", request.url));
+  const doneUrl = new URL("/github/connected", request.url);
+  doneUrl.searchParams.set("login", githubUser.login);
+  const response = NextResponse.redirect(doneUrl);
   return response;
 }
