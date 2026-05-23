@@ -29,6 +29,11 @@ export const getProjectWithFiles = internalQuery({
         return { name: file.name, content: file.content, storageUrl };
       })
     );
+    filesWithUrls.push({
+      name: ".betterleaf/entrypoint.txt",
+      content: entrypoint,
+      storageUrl: null,
+    });
 
     return {
       compiler: project.compiler ?? "pdflatex",

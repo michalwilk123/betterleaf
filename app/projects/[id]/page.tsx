@@ -127,9 +127,17 @@ function dirname(path: string) {
 async function computeContentHash(
   files: Array<{ _id: string; name: string; content: string; storageUrl?: string | null }>,
   activeFileId: string | null,
-  currentContent: string
+  currentContent: string,
+  entrypoint: string
 ): Promise<string> {
-  const sortedFiles = [...files].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedFiles = [
+    ...files,
+    {
+      _id: "__betterleaf_entrypoint",
+      name: ".betterleaf/entrypoint.txt",
+      content: entrypoint,
+    },
+  ].sort((a, b) => a.name.localeCompare(b.name));
   const hashInput: Array<[string, string]> = [];
 
   for (const file of sortedFiles) {
@@ -195,7 +203,25 @@ export default function EditorPage() {
   const [syncingGithub, setSyncingGithub] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | undefined>(undefined);
   const [fromCache, setFromCache] = useState(false);
+  const [showCachedNotice, setShowCachedNotice] = useState(false);
   const lastCompileRef = useRef<{ hash: string; pdfUrl: string } | null>(null);
+
+  useEffect(() => {
+    if (!fromCache) return;
+
+    setShowCachedNotice(true);
+    const fadeTimeoutId = window.setTimeout(() => {
+      setFromCache(false);
+    }, 1500);
+    const hideTimeoutId = window.setTimeout(() => {
+      setShowCachedNotice(false);
+    }, 2000);
+
+    return () => {
+      window.clearTimeout(fadeTimeoutId);
+      window.clearTimeout(hideTimeoutId);
+    };
+  }, [fromCache]);
 
   // File rename
   const [renamingFileId, setRenamingFileId] = useState<Id<"projectFiles"> | null>(null);
@@ -220,10 +246,15 @@ export default function EditorPage() {
   // PDF panel
   const [pdfCollapsed, setPdfCollapsed] = useState(false);
   const pdfPanelRef = usePanelRef();
+  const [optimisticEntrypointFileId, setOptimisticEntrypointFileId] = useState<string | null>(null);
 
   // --- Entrypoint resolution ---
   const entrypointFile = useMemo(() => {
     if (!files || !project) return null;
+    if (optimisticEntrypointFileId) {
+      const optimistic = files.find((f) => f._id === optimisticEntrypointFileId);
+      if (optimistic) return optimistic;
+    }
     // If project has explicit entrypoint, use it (if it still exists)
     if (project.entrypointFileId) {
       const explicit = files.find((f) => f._id === project.entrypointFileId);
@@ -231,7 +262,11 @@ export default function EditorPage() {
     }
     // Fallback: first root-level .tex file
     return files.find((f) => f.name.endsWith(".tex") && !f.name.includes("/")) ?? null;
-  }, [files, project]);
+  }, [files, project, optimisticEntrypointFileId]);
+
+  useEffect(() => {
+    setOptimisticEntrypointFileId(null);
+  }, [project?.entrypointFileId, project?._id]);
 
   // Sync project name from query
   useEffect(() => {
@@ -411,6 +446,21 @@ export default function EditorPage() {
     [files]
   );
 
+  const changeEntrypoint = useCallback(
+    async (fileId: Id<"projectFiles">) => {
+      if (!project) return;
+      setOptimisticEntrypointFileId(fileId);
+      try {
+        await setEntrypoint({ projectId: project._id, fileId });
+        lastCompileRef.current = null;
+      } catch (error) {
+        setOptimisticEntrypointFileId(null);
+        toast.error(error instanceof Error ? error.message : "Failed to set entrypoint");
+      }
+    },
+    [project, setEntrypoint]
+  );
+
   const save = useCallback(async () => {
     if (!activeFileId) return;
     setSaving(true);
@@ -439,7 +489,7 @@ export default function EditorPage() {
     setFromCache(false);
 
     try {
-      const hash = await computeContentHash(files, activeFileId, content);
+      const hash = await computeContentHash(files, activeFileId, content, entrypointFile.name);
 
       // Session-local cache hit
       if (!forceRecompile && lastCompileRef.current?.hash === hash) {
@@ -881,8 +931,12 @@ export default function EditorPage() {
           {(accessLevel === "editor" || accessLevel === "public-editor") && (
             <Badge variant="secondary" className="border-emerald-300 bg-emerald-50 text-emerald-700 border">Editor</Badge>
           )}
-          {fromCache && (
-            <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium">
+          {showCachedNotice && (
+            <span
+              className={`flex items-center gap-1 text-xs text-emerald-600 font-medium transition-opacity duration-500 ${
+                fromCache ? "opacity-100" : "opacity-0"
+              }`}
+            >
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               Cached
             </span>
@@ -1104,7 +1158,7 @@ export default function EditorPage() {
                                           <>
                                             <DropdownMenuItem
                                               onClick={() =>
-                                                setEntrypoint({ projectId: project._id, fileId: f._id })
+                                                changeEntrypoint(f._id)
                                               }
                                             >
                                               <Target className="mr-2 h-4 w-4" />
@@ -1196,7 +1250,7 @@ export default function EditorPage() {
                               <>
                                 <DropdownMenuItem
                                   onClick={() =>
-                                    setEntrypoint({ projectId: project._id, fileId: f._id })
+                                    changeEntrypoint(f._id)
                                   }
                                 >
                                   <Target className="mr-2 h-4 w-4" />

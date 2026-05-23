@@ -11,20 +11,6 @@ export const getConnectionForAction = internalQuery({
   },
 });
 
-export const adminClearConnectionByLogin = internalMutation({
-  args: { login: v.string() },
-  handler: async (ctx, { login }) => {
-    const matches = await ctx.db
-      .query("githubConnections")
-      .filter((q) => q.eq(q.field("login"), login))
-      .collect();
-    for (const row of matches) {
-      await ctx.db.delete(row._id);
-    }
-    return { deleted: matches.length };
-  },
-});
-
 export const markInstalledConnection = internalMutation({
   args: {
     userId: v.string(),

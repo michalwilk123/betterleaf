@@ -93,7 +93,13 @@ async function getInstallationTokenForRepo(owner: string, repo: string) {
 
 function decodeBase64(content: string) {
   const normalized = content.replace(/\n/g, "");
-  return atob(normalized);
+  const binary = atob(normalized);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
+function hasLikelyUtf8Mojibake(content: string) {
+  return /(?:Ã.|Å.|Ä.|Â.|â[]|Î.|Ï.)/.test(content);
 }
 
 export const status = query({
@@ -166,11 +172,6 @@ export const createOAuthState = mutation({
     if (!user) throw new Error("Not authenticated");
 
     const now = Date.now();
-    console.log("[github.createOAuthState] storing OAuth state", {
-      userId: user._id as string,
-      stateLength: state.length,
-      expiresAt: now + 10 * 60 * 1000,
-    });
     await ctx.db.insert("githubOAuthStates", {
       state,
       userId: user._id as string,
@@ -189,21 +190,11 @@ export const consumeOAuthStateAndSaveConnection = mutation({
     scope: v.optional(v.string()),
   },
   handler: async (ctx, { state, githubUserId, login, accessToken, scope }) => {
-    console.log("[github.consumeOAuthStateAndSaveConnection] consuming OAuth state", {
-      login,
-      githubUserId,
-      stateLength: state.length,
-      scope,
-    });
     const oauthState = await ctx.db
       .query("githubOAuthStates")
       .withIndex("by_state", (q) => q.eq("state", state))
       .unique();
     if (!oauthState || oauthState.expiresAt < Date.now()) {
-      console.warn("[github.consumeOAuthStateAndSaveConnection] invalid OAuth state", {
-        found: Boolean(oauthState),
-        expired: oauthState ? oauthState.expiresAt < Date.now() : null,
-      });
       throw new Error("Invalid GitHub authorization state");
     }
 
@@ -223,20 +214,12 @@ export const consumeOAuthStateAndSaveConnection = mutation({
     };
     if (existing) {
       await ctx.db.patch(existing._id, connection);
-      console.log("[github.consumeOAuthStateAndSaveConnection] updated GitHub connection", {
-        userId: oauthState.userId,
-        login,
-      });
       return;
     }
     await ctx.db.insert("githubConnections", {
       userId: oauthState.userId,
       ...connection,
       createdAt: now,
-    });
-    console.log("[github.consumeOAuthStateAndSaveConnection] created GitHub connection", {
-      userId: oauthState.userId,
-      login,
     });
   },
 });
@@ -292,30 +275,17 @@ export const verifyInstallation = action({
     if (!user) throw new Error("Not authenticated");
 
     const parsedRepo = normalizeRepo(repo);
-    console.log("[github.verifyInstallation] checking installation", {
-      userId: user._id as string,
-      repo: `${parsedRepo.owner}/${parsedRepo.name}`,
-    });
 
     try {
       await getInstallationTokenForRepo(parsedRepo.owner, parsedRepo.name);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown installation error";
-      console.log("[github.verifyInstallation] installation not ready", {
-        repo: `${parsedRepo.owner}/${parsedRepo.name}`,
-        message,
-      });
       return { installed: false, message };
     }
 
     await ctx.runMutation(internal.githubInternal.markInstalledConnection, {
       userId: user._id as string,
       login: `GitHub App installed for ${parsedRepo.owner}/${parsedRepo.name}`,
-    });
-
-    console.log("[github.verifyInstallation] installation verified", {
-      userId: user._id as string,
-      repo: `${parsedRepo.owner}/${parsedRepo.name}`,
     });
 
     return { installed: true };
@@ -349,7 +319,14 @@ export const syncFromGithub = action({
       project.githubRepoName,
       project.githubBranch
     );
-    if (latestCommit === project.githubLastCommitSha) return { updated: false };
+    if (latestCommit === project.githubLastCommitSha) {
+      const localFiles = await ctx.runQuery(api.files.listByProject, { projectId });
+      const hasCorruptedText = localFiles.some(
+        (file: { storageId?: Id<"_storage">; content: string }) =>
+          !file.storageId && hasLikelyUtf8Mojibake(file.content)
+      );
+      if (!hasCorruptedText) return { updated: false };
+    }
 
     const files = await readGithubTextFiles(
       installationToken,
@@ -384,6 +361,16 @@ export const commitProject = action({
     if (!connection) throw new Error("Connect GitHub before committing this project");
 
     const files = await ctx.runQuery(api.files.listByProject, { projectId });
+    const corruptedFile = files.find(
+      (file: { storageId?: Id<"_storage">; name: string; content: string }) =>
+        !file.storageId && hasLikelyUtf8Mojibake(file.content)
+    );
+    if (corruptedFile) {
+      throw new Error(
+        `Refusing to commit because ${corruptedFile.name} contains text that looks like corrupted UTF-8. Sync from GitHub first to reload the file with the fixed decoder.`
+      );
+    }
+
     const installationToken = await getInstallationTokenForRepo(
       project.githubRepoOwner,
       project.githubRepoName
