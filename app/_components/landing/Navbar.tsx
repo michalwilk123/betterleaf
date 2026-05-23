@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Leaf } from "lucide-react";
+import { FolderOpen, Leaf } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { authClient } from "@/lib/auth-client";
 
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
+  const { data: session, isPending } = authClient.useSession();
+  const isAuthed = !!session;
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -31,12 +34,23 @@ export function Navbar() {
         </Link>
 
         <div className="flex items-center gap-3">
-          <Button variant="ghost" asChild className="text-white/70 hover:text-white hover:bg-white/10">
-            <Link href="/enter">Sign in</Link>
-          </Button>
-          <Button asChild size="sm">
-            <Link href="/enter">Get Started</Link>
-          </Button>
+          {isPending ? null : isAuthed ? (
+            <Button asChild size="sm" className="gap-2">
+              <Link href="/projects">
+                <FolderOpen className="h-4 w-4" />
+                Projects
+              </Link>
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" asChild className="text-white/70 hover:text-white hover:bg-white/10">
+                <Link href="/enter">Sign in</Link>
+              </Button>
+              <Button asChild size="sm">
+                <Link href="/enter">Get Started</Link>
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </nav>

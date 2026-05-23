@@ -132,6 +132,7 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
   const [branch, setBranch] = useState("main");
   const [repoPath, setRepoPath] = useState("");
   const [creating, setCreating] = useState(false);
+  const [connectingGithub, setConnectingGithub] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ processed: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -236,14 +237,28 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
   };
 
   const connectGithub = async () => {
+    if (connectingGithub) return;
+    setConnectingGithub(true);
+    // Open the placeholder tab synchronously so the browser doesn't classify it as a popup.
+    // We need to keep a handle on the tab to navigate it after the state mutation resolves,
+    // so we cannot use `noopener` here (which forces the return value to null).
+    const newTab = window.open("about:blank", "_blank");
     try {
       const stateBytes = new Uint8Array(24);
       crypto.getRandomValues(stateBytes);
       const state = Array.from(stateBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
       await createOAuthState({ state });
-      window.location.href = `/api/github/connect?state=${encodeURIComponent(state)}`;
+      const target = `/api/github/connect?state=${encodeURIComponent(state)}`;
+      if (newTab && !newTab.closed) {
+        newTab.location.href = target;
+      } else {
+        window.location.href = target;
+      }
     } catch (error) {
+      if (newTab && !newTab.closed) newTab.close();
       toast.error(error instanceof Error ? error.message : "Failed to start GitHub authorization");
+    } finally {
+      setConnectingGithub(false);
     }
   };
 
@@ -317,9 +332,14 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
                       size="sm"
                       className="gap-2"
                       onClick={connectGithub}
+                      disabled={connectingGithub}
                     >
-                      <Github className="h-4 w-4" />
-                      Install / manage app
+                      {connectingGithub ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Github className="h-4 w-4" />
+                      )}
+                      {connectingGithub ? "Opening GitHub..." : "Install / manage app"}
                     </Button>
                     <Button
                       type="button"
@@ -347,9 +367,14 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
                   variant="outline"
                   className="w-full gap-2"
                   onClick={connectGithub}
+                  disabled={connectingGithub}
                 >
-                  <Github className="h-4 w-4" />
-                  Connect GitHub
+                  {connectingGithub ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Github className="h-4 w-4" />
+                  )}
+                  {connectingGithub ? "Opening GitHub..." : "Connect GitHub"}
                 </Button>
               )}
             </div>

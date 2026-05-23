@@ -9,12 +9,25 @@ export async function GET(request: NextRequest) {
   const installationId = url.searchParams.get("installation_id");
 
   if (!state) {
+    console.warn("[github/callback] missing state", {
+      hasCode: Boolean(code),
+      hasInstallationId: Boolean(installationId),
+    });
     return NextResponse.redirect(new URL("/projects?github=error", request.url));
   }
+
+  console.info("[github/callback] received callback", {
+    hasCode: Boolean(code),
+    hasInstallationId: Boolean(installationId),
+    stateLength: state.length,
+  });
 
   // App was installed without OAuth-during-install enabled: fall back to OAuth so we can identify the user.
   if (!code) {
     if (!installationId) {
+      console.warn("[github/callback] missing code and installation_id", {
+        stateLength: state.length,
+      });
       return NextResponse.redirect(new URL("/projects?github=error", request.url));
     }
     const clientId = process.env.GITHUB_CLIENT_ID;
@@ -49,6 +62,11 @@ export async function GET(request: NextRequest) {
   });
   const tokenBody = await tokenResponse.json();
   if (!tokenResponse.ok || !tokenBody.access_token) {
+    console.warn("[github/callback] token exchange failed", {
+      status: tokenResponse.status,
+      error: tokenBody?.error,
+      errorDescription: tokenBody?.error_description,
+    });
     return NextResponse.redirect(new URL("/projects?github=error", request.url));
   }
 
@@ -61,6 +79,10 @@ export async function GET(request: NextRequest) {
   });
   const githubUser = await userResponse.json();
   if (!userResponse.ok) {
+    console.warn("[github/callback] GitHub user fetch failed", {
+      status: userResponse.status,
+      message: githubUser?.message,
+    });
     return NextResponse.redirect(new URL("/projects?github=error", request.url));
   }
 
@@ -73,6 +95,10 @@ export async function GET(request: NextRequest) {
     scope: tokenBody.scope || undefined,
   });
 
+  console.info("[github/callback] saved GitHub connection", {
+    login: githubUser.login,
+    githubUserId: githubUser.id,
+  });
   const response = NextResponse.redirect(new URL("/projects?github=connected", request.url));
   return response;
 }

@@ -166,6 +166,11 @@ export const createOAuthState = mutation({
     if (!user) throw new Error("Not authenticated");
 
     const now = Date.now();
+    console.log("[github.createOAuthState] storing OAuth state", {
+      userId: user._id as string,
+      stateLength: state.length,
+      expiresAt: now + 10 * 60 * 1000,
+    });
     await ctx.db.insert("githubOAuthStates", {
       state,
       userId: user._id as string,
@@ -184,11 +189,21 @@ export const consumeOAuthStateAndSaveConnection = mutation({
     scope: v.optional(v.string()),
   },
   handler: async (ctx, { state, githubUserId, login, accessToken, scope }) => {
+    console.log("[github.consumeOAuthStateAndSaveConnection] consuming OAuth state", {
+      login,
+      githubUserId,
+      stateLength: state.length,
+      scope,
+    });
     const oauthState = await ctx.db
       .query("githubOAuthStates")
       .withIndex("by_state", (q) => q.eq("state", state))
       .unique();
     if (!oauthState || oauthState.expiresAt < Date.now()) {
+      console.warn("[github.consumeOAuthStateAndSaveConnection] invalid OAuth state", {
+        found: Boolean(oauthState),
+        expired: oauthState ? oauthState.expiresAt < Date.now() : null,
+      });
       throw new Error("Invalid GitHub authorization state");
     }
 
@@ -208,12 +223,20 @@ export const consumeOAuthStateAndSaveConnection = mutation({
     };
     if (existing) {
       await ctx.db.patch(existing._id, connection);
+      console.log("[github.consumeOAuthStateAndSaveConnection] updated GitHub connection", {
+        userId: oauthState.userId,
+        login,
+      });
       return;
     }
     await ctx.db.insert("githubConnections", {
       userId: oauthState.userId,
       ...connection,
       createdAt: now,
+    });
+    console.log("[github.consumeOAuthStateAndSaveConnection] created GitHub connection", {
+      userId: oauthState.userId,
+      login,
     });
   },
 });
