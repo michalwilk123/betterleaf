@@ -252,10 +252,6 @@ export const createSyncedProject = action({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const user = await authComponent.getAuthUser(ctx as any);
     if (!user) throw new Error("Not authenticated");
-    const connection = await ctx.runQuery(internal.githubInternal.getConnectionForAction, {
-      userId: user._id as string,
-    });
-    if (!connection) throw new Error("Connect GitHub before creating a synced project");
 
     const repo = normalizeRepo(args.repo);
     const rootPath = normalizePath(args.path);
@@ -285,6 +281,44 @@ export const createSyncedProject = action({
       githubLastCommitSha: latestCommit,
     });
     return result;
+  },
+});
+
+export const verifyInstallation = action({
+  args: { repo: v.string() },
+  handler: async (ctx, { repo }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const user = await authComponent.getAuthUser(ctx as any);
+    if (!user) throw new Error("Not authenticated");
+
+    const parsedRepo = normalizeRepo(repo);
+    console.log("[github.verifyInstallation] checking installation", {
+      userId: user._id as string,
+      repo: `${parsedRepo.owner}/${parsedRepo.name}`,
+    });
+
+    try {
+      await getInstallationTokenForRepo(parsedRepo.owner, parsedRepo.name);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown installation error";
+      console.log("[github.verifyInstallation] installation not ready", {
+        repo: `${parsedRepo.owner}/${parsedRepo.name}`,
+        message,
+      });
+      return { installed: false, message };
+    }
+
+    await ctx.runMutation(internal.githubInternal.markInstalledConnection, {
+      userId: user._id as string,
+      login: `GitHub App installed for ${parsedRepo.owner}/${parsedRepo.name}`,
+    });
+
+    console.log("[github.verifyInstallation] installation verified", {
+      userId: user._id as string,
+      repo: `${parsedRepo.owner}/${parsedRepo.name}`,
+    });
+
+    return { installed: true };
   },
 });
 

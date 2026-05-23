@@ -133,6 +133,7 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
   const [repoPath, setRepoPath] = useState("");
   const [creating, setCreating] = useState(false);
   const [connectingGithub, setConnectingGithub] = useState(false);
+  const [verifyingGithub, setVerifyingGithub] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ processed: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -141,6 +142,7 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
   const disconnectGithub = useMutation(api.github.disconnect);
   const createProject = useMutation(api.projects.create);
   const createSyncedProject = useAction(api.github.createSyncedProject);
+  const verifyGithubInstallation = useAction(api.github.verifyInstallation);
   const generateFileUploadUrl = useMutation(api.files.generateUploadUrl);
   const createManyText = useMutation(api.files.createManyText);
   const createManyBinary = useMutation(api.files.createManyBinary);
@@ -237,28 +239,62 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
   };
 
   const connectGithub = async () => {
-    if (connectingGithub) return;
+    if (connectingGithub || verifyingGithub) return;
     setConnectingGithub(true);
     // Open the placeholder tab synchronously so the browser doesn't classify it as a popup.
     // We need to keep a handle on the tab to navigate it after the state mutation resolves,
     // so we cannot use `noopener` here (which forces the return value to null).
     const newTab = window.open("about:blank", "_blank");
+    if (!newTab) {
+      setConnectingGithub(false);
+      toast.error("Allow popups for BetterLeaf to install the GitHub App without leaving this page");
+      return;
+    }
+
     try {
       const stateBytes = new Uint8Array(24);
       crypto.getRandomValues(stateBytes);
       const state = Array.from(stateBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
       await createOAuthState({ state });
       const target = `/api/github/connect?state=${encodeURIComponent(state)}`;
-      if (newTab && !newTab.closed) {
+      console.info("[github-ui] opening GitHub App install tab", {
+        repo,
+        stateLength: state.length,
+      });
+      if (!newTab.closed) {
         newTab.location.href = target;
-      } else {
-        window.location.href = target;
       }
+
+      setConnectingGithub(false);
+      setVerifyingGithub(true);
+      toast.info("Finish installing the GitHub App in the new tab");
+
+      const startedAt = Date.now();
+      for (let attempt = 1; attempt <= 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const result = await verifyGithubInstallation({ repo });
+        console.info("[github-ui] installation verification attempt", {
+          repo,
+          attempt,
+          installed: result.installed,
+          elapsedMs: Date.now() - startedAt,
+        });
+        if (result.installed) {
+          if (!newTab.closed) newTab.close();
+          toast.success("GitHub App installed");
+          return;
+        }
+      }
+
+      toast.warning("GitHub App installation was not detected yet", {
+        description: "Return here after installing it, or click Install / manage app again.",
+      });
     } catch (error) {
       if (newTab && !newTab.closed) newTab.close();
       toast.error(error instanceof Error ? error.message : "Failed to start GitHub authorization");
     } finally {
       setConnectingGithub(false);
+      setVerifyingGithub(false);
     }
   };
 
@@ -332,14 +368,18 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
                       size="sm"
                       className="gap-2"
                       onClick={connectGithub}
-                      disabled={connectingGithub}
+                      disabled={connectingGithub || verifyingGithub}
                     >
-                      {connectingGithub ? (
+                      {connectingGithub || verifyingGithub ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Github className="h-4 w-4" />
                       )}
-                      {connectingGithub ? "Opening GitHub..." : "Install / manage app"}
+                      {connectingGithub
+                        ? "Opening GitHub..."
+                        : verifyingGithub
+                          ? "Checking install..."
+                          : "Install / manage app"}
                     </Button>
                     <Button
                       type="button"
@@ -367,14 +407,18 @@ export function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
                   variant="outline"
                   className="w-full gap-2"
                   onClick={connectGithub}
-                  disabled={connectingGithub}
+                  disabled={connectingGithub || verifyingGithub}
                 >
-                  {connectingGithub ? (
+                  {connectingGithub || verifyingGithub ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Github className="h-4 w-4" />
                   )}
-                  {connectingGithub ? "Opening GitHub..." : "Connect GitHub"}
+                  {connectingGithub
+                    ? "Opening GitHub..."
+                    : verifyingGithub
+                      ? "Checking install..."
+                      : "Connect GitHub"}
                 </Button>
               )}
             </div>
