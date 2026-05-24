@@ -1035,7 +1035,10 @@ export default function EditorPage() {
           )}
 
           {/* File list */}
-          <nav className="flex-1 overflow-y-auto px-2">
+          <nav
+            className="flex-1 overflow-y-auto px-2"
+            style={{ fontSize: editorOptions.fontSize }}
+          >
             {rootDirectories.map((dirPath) => {
               const renderDirectory = (path: string, depth: number): ReactNode => {
                 const dirName = basename(path);
@@ -1080,7 +1083,7 @@ export default function EditorPage() {
                         setDropDirPath(null);
                       }}
                       style={{ paddingLeft: `${8 + depth * 14}px` }}
-                      className={`w-full flex items-center gap-1.5 text-left py-1.5 rounded-md text-sm transition-colors ${
+                      className={`w-full flex items-center gap-1.5 text-left py-1.5 rounded-md transition-colors ${
                         isDropTarget
                           ? "bg-primary/15 text-primary"
                           : "text-foreground hover:bg-accent/50"
@@ -1104,7 +1107,6 @@ export default function EditorPage() {
                         {childDirectories.map((child) => renderDirectory(child, depth + 1))}
                         {directoryFiles.map((f) => {
                           const isEntrypoint = entrypointFile?._id === f._id;
-                          const isTexFile = f.name.endsWith(".tex");
                           return (
                             <div key={f._id} className="group flex items-center">
                               {renamingFileId === f._id ? (
@@ -1134,7 +1136,7 @@ export default function EditorPage() {
                                     }}
                                     onClick={() => openFile(f._id)}
                                     style={{ paddingLeft: `${24 + (depth + 1) * 14}px` }}
-                                    className={`flex-1 flex items-center gap-2 text-left py-1.5 rounded-md text-sm transition-colors ${
+                                    className={`flex-1 flex items-center gap-2 text-left py-1.5 rounded-md transition-colors ${
                                       f._id === activeFileId
                                         ? "bg-primary/10 text-primary font-medium"
                                         : "text-foreground hover:bg-accent/50"
@@ -1154,19 +1156,6 @@ export default function EditorPage() {
                                         </button>
                                       </DropdownMenuTrigger>
                                       <DropdownMenuContent align="end" className="w-44">
-                                        {isOwner && isTexFile && !isEntrypoint && (
-                                          <>
-                                            <DropdownMenuItem
-                                              onClick={() =>
-                                                changeEntrypoint(f._id)
-                                              }
-                                            >
-                                              <Target className="mr-2 h-4 w-4" />
-                                              Set as entrypoint
-                                            </DropdownMenuItem>
-                                            <DropdownMenuSeparator />
-                                          </>
-                                        )}
                                         <DropdownMenuItem onClick={() => startRenameFile(f._id, f.name)}>
                                           <Pencil className="mr-2 h-4 w-4" />
                                           Rename
@@ -1197,7 +1186,6 @@ export default function EditorPage() {
             })}
             {(filesByDir.get("") ?? []).map((f) => {
               const isEntrypoint = entrypointFile?._id === f._id;
-              const isTexFile = f.name.endsWith(".tex");
               return (
                 <div key={f._id} className="group flex items-center">
                   {renamingFileId === f._id ? (
@@ -1226,7 +1214,7 @@ export default function EditorPage() {
                           setDropDirPath(null);
                         }}
                         onClick={() => openFile(f._id)}
-                        className={`flex-1 flex items-center gap-2 text-left px-3 py-1.5 rounded-md text-sm transition-colors ${
+                        className={`flex-1 flex items-center gap-2 text-left px-3 py-1.5 rounded-md transition-colors ${
                           f._id === activeFileId
                             ? "bg-primary/10 text-primary font-medium"
                             : "text-foreground hover:bg-accent/50"
@@ -1246,19 +1234,6 @@ export default function EditorPage() {
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-44">
-                            {isOwner && isTexFile && !isEntrypoint && (
-                              <>
-                                <DropdownMenuItem
-                                  onClick={() =>
-                                    changeEntrypoint(f._id)
-                                  }
-                                >
-                                  <Target className="mr-2 h-4 w-4" />
-                                  Set as entrypoint
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                              </>
-                            )}
                             <DropdownMenuItem onClick={() => startRenameFile(f._id, f.name)}>
                               <Pencil className="mr-2 h-4 w-4" />
                               Rename
@@ -1402,7 +1377,7 @@ export default function EditorPage() {
                   }}
                   options={{
                     minimap: { enabled: editorOptions.minimap },
-                    fontSize: 14,
+                    fontSize: editorOptions.fontSize,
                     wordWrap: editorOptions.wordWrap ? "on" : "off",
                     lineNumbers: editorOptions.lineNumbers ? "on" : "off",
                     padding: { top: 16 },
@@ -1480,6 +1455,10 @@ export default function EditorPage() {
             haltOnError: settings.haltOnError,
           });
         }}
+        files={files ?? []}
+        entrypointFileId={project.entrypointFileId}
+        onSetEntrypoint={(fileId) => changeEntrypoint(fileId)}
+        isOwner={isOwner}
       />
     </div>
   );
