@@ -16,6 +16,11 @@ type GithubBinaryFile = {
   storageId: Id<"_storage">;
 };
 
+type GithubTreeEntry = {
+  path: string;
+  type: string;
+};
+
 type GithubFile = GithubTextFile;
 
 const TEXT_FILE_PATTERN =
@@ -367,7 +372,18 @@ export const syncFromGithub = action({
         (file: { storageId?: Id<"_storage">; content: string }) =>
           !file.storageId && hasLikelyUtf8Mojibake(file.content)
       );
-      if (!hasCorruptedText) return { updated: false };
+      if (!hasCorruptedText) {
+        const remotePaths = await readGithubFilePaths(
+          installationToken,
+          project.githubRepoOwner,
+          project.githubRepoName,
+          project.githubBranch,
+          project.githubPath ?? ""
+        );
+        const localPaths = new Set(localFiles.map((file: { name: string }) => file.name));
+        const hasMissingRemoteFile = remotePaths.some((path) => !localPaths.has(path));
+        if (!hasMissingRemoteFile) return { updated: false };
+      }
     }
 
     const files = await readGithubFiles(
@@ -454,16 +470,7 @@ async function readGithubFiles(
   branch: string,
   rootPath: string
 ): Promise<{ textFiles: GithubTextFile[]; binaryFiles: GithubBinaryFile[] }> {
-  const tree = await githubFetch(
-    token,
-    `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`
-  );
-  const prefix = rootPath ? `${rootPath}/` : "";
-  const entries = (tree.tree as Array<{ path: string; type: string }>).filter((entry) => {
-    if (entry.type !== "blob") return false;
-    if (rootPath && entry.path !== rootPath && !entry.path.startsWith(prefix)) return false;
-    return !IGNORED_GITHUB_PATH_PATTERN.test(entry.path);
-  });
+  const entries = await readGithubTreeEntries(token, owner, repo, branch, rootPath);
 
   const textFiles: GithubTextFile[] = [];
   const binaryFiles: GithubBinaryFile[] = [];
@@ -472,7 +479,7 @@ async function readGithubFiles(
       token,
       `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(entry.path)}?ref=${encodeURIComponent(branch)}`
     );
-    const relativePath = rootPath ? entry.path.slice(prefix.length) : entry.path;
+    const relativePath = getGithubRelativePath(entry.path, rootPath);
     if (TEXT_FILE_PATTERN.test(entry.path)) {
       textFiles.push({ path: relativePath, content: decodeBase64(data.content) });
     } else {
@@ -484,6 +491,40 @@ async function readGithubFiles(
     }
   }
   return { textFiles, binaryFiles };
+}
+
+async function readGithubFilePaths(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  rootPath: string
+) {
+  const entries = await readGithubTreeEntries(token, owner, repo, branch, rootPath);
+  return entries.map((entry) => getGithubRelativePath(entry.path, rootPath));
+}
+
+async function readGithubTreeEntries(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  rootPath: string
+) {
+  const tree = await githubFetch(
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`
+  );
+  const prefix = rootPath ? `${rootPath}/` : "";
+  return (tree.tree as GithubTreeEntry[]).filter((entry) => {
+    if (entry.type !== "blob") return false;
+    if (rootPath && entry.path !== rootPath && !entry.path.startsWith(prefix)) return false;
+    return !IGNORED_GITHUB_PATH_PATTERN.test(entry.path);
+  });
+}
+
+function getGithubRelativePath(path: string, rootPath: string) {
+  return rootPath ? path.slice(`${rootPath}/`.length) : path;
 }
 
 async function commitFiles(
