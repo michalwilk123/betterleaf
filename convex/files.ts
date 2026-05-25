@@ -279,6 +279,70 @@ export const replaceProjectTextFiles = mutation({
   },
 });
 
+export const replaceProjectFiles = mutation({
+  args: {
+    projectId: v.id("projects"),
+    textFiles: v.array(v.object({ name: v.string(), content: v.string() })),
+    binaryFiles: v.array(v.object({ name: v.string(), storageId: v.id("_storage") })),
+    githubLastCommitSha: v.string(),
+  },
+  handler: async (ctx, { projectId, textFiles, binaryFiles, githubLastCommitSha }) => {
+    const { project } = await checkAccess(ctx, projectId, true);
+    const totalBytes = textFiles.reduce(
+      (sum, f) => sum + new TextEncoder().encode(f.content).byteLength,
+      0
+    );
+    await checkProjectSize(ctx, projectId, totalBytes);
+
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("projectFiles")
+      .withIndex("by_projectId", (q) => q.eq("projectId", projectId))
+      .collect();
+
+    for (const file of existing) {
+      if (file.storageId) await ctx.storage.delete(file.storageId);
+      await ctx.db.delete(file._id);
+    }
+
+    let entrypointFileId: Id<"projectFiles"> | undefined;
+    for (const file of textFiles) {
+      const fileId = await ctx.db.insert("projectFiles", {
+        projectId,
+        name: file.name,
+        content: file.content,
+        createdAt: now,
+        updatedAt: now,
+      });
+      if (
+        file.name === "main.tex" ||
+        (!entrypointFileId && file.name.endsWith(".tex") && !file.name.includes("/"))
+      ) {
+        entrypointFileId = fileId;
+      }
+    }
+
+    for (const file of binaryFiles) {
+      await ctx.db.insert("projectFiles", {
+        projectId,
+        name: file.name,
+        content: "",
+        storageId: file.storageId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await ctx.db.patch(projectId, {
+      entrypointFileId,
+      githubLastCommitSha,
+      updatedAt: now,
+    });
+
+    return { project };
+  },
+});
+
 export const remove = mutation({
   args: { fileId: v.id("projectFiles") },
   handler: async (ctx, { fileId }) => {

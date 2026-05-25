@@ -3,15 +3,25 @@ import { action, mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { authComponent } from "./auth";
 import type { Id } from "./_generated/dataModel";
+import type { ActionCtx } from "./_generated/server";
 import { importPKCS8, SignJWT } from "jose";
 
-type GithubFile = {
+type GithubTextFile = {
   path: string;
   content: string;
 };
 
+type GithubBinaryFile = {
+  path: string;
+  storageId: Id<"_storage">;
+};
+
+type GithubFile = GithubTextFile;
+
 const TEXT_FILE_PATTERN =
   /\.(tex|bib|bst|cls|sty|md|txt|json|yaml|yml|csv|tikz|cfg|def|bbx|cbx|lbx)$/i;
+const IGNORED_GITHUB_PATH_PATTERN =
+  /(^|\/)(\.git|node_modules|\.next|out|build|coverage)(\/|$)/i;
 
 function normalizeRepo(input: string) {
   const trimmed = input.trim().replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "");
@@ -96,6 +106,33 @@ function decodeBase64(content: string) {
   const binary = atob(normalized);
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
+function decodeBase64Bytes(content: string) {
+  const normalized = content.replace(/\n/g, "");
+  const binary = atob(normalized);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function getContentType(path: string) {
+  const ext = path.split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "svg":
+      return "image/svg+xml";
+    case "pdf":
+      return "application/pdf";
+    default:
+      return "application/octet-stream";
+  }
 }
 
 function hasLikelyUtf8Mojibake(content: string) {
@@ -241,7 +278,8 @@ export const createSyncedProject = action({
     const branch = args.branch.trim();
     const installationToken = await getInstallationTokenForRepo(repo.owner, repo.name);
     const latestCommit = await getBranchCommit(installationToken, repo.owner, repo.name, branch);
-    const files = await readGithubTextFiles(
+    const files = await readGithubFiles(
+      ctx,
       installationToken,
       repo.owner,
       repo.name,
@@ -258,9 +296,13 @@ export const createSyncedProject = action({
       githubPath: rootPath,
       githubLastCommitSha: latestCommit,
     });
-    await ctx.runMutation(api.files.replaceProjectTextFiles, {
+    await ctx.runMutation(api.files.replaceProjectFiles, {
       projectId: result.projectId,
-      files: files.map((file) => ({ name: file.path, content: file.content })),
+      textFiles: files.textFiles.map((file) => ({ name: file.path, content: file.content })),
+      binaryFiles: files.binaryFiles.map((file) => ({
+        name: file.path,
+        storageId: file.storageId,
+      })),
       githubLastCommitSha: latestCommit,
     });
     return result;
@@ -328,16 +370,21 @@ export const syncFromGithub = action({
       if (!hasCorruptedText) return { updated: false };
     }
 
-    const files = await readGithubTextFiles(
+    const files = await readGithubFiles(
+      ctx,
       installationToken,
       project.githubRepoOwner,
       project.githubRepoName,
       project.githubBranch,
       project.githubPath ?? ""
     );
-    await ctx.runMutation(api.files.replaceProjectTextFiles, {
+    await ctx.runMutation(api.files.replaceProjectFiles, {
       projectId,
-      files: files.map((file) => ({ name: file.path, content: file.content })),
+      textFiles: files.textFiles.map((file) => ({ name: file.path, content: file.content })),
+      binaryFiles: files.binaryFiles.map((file) => ({
+        name: file.path,
+        storageId: file.storageId,
+      })),
       githubLastCommitSha: latestCommit,
     });
     return { updated: true };
@@ -399,13 +446,14 @@ async function getBranchCommit(token: string, owner: string, repo: string, branc
   return data.commit.sha as string;
 }
 
-async function readGithubTextFiles(
+async function readGithubFiles(
+  ctx: ActionCtx,
   token: string,
   owner: string,
   repo: string,
   branch: string,
   rootPath: string
-): Promise<GithubFile[]> {
+): Promise<{ textFiles: GithubTextFile[]; binaryFiles: GithubBinaryFile[] }> {
   const tree = await githubFetch(
     token,
     `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`
@@ -414,19 +462,28 @@ async function readGithubTextFiles(
   const entries = (tree.tree as Array<{ path: string; type: string }>).filter((entry) => {
     if (entry.type !== "blob") return false;
     if (rootPath && entry.path !== rootPath && !entry.path.startsWith(prefix)) return false;
-    return TEXT_FILE_PATTERN.test(entry.path);
+    return !IGNORED_GITHUB_PATH_PATTERN.test(entry.path);
   });
 
-  const files: GithubFile[] = [];
+  const textFiles: GithubTextFile[] = [];
+  const binaryFiles: GithubBinaryFile[] = [];
   for (const entry of entries) {
     const data = await githubFetch(
       token,
       `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(entry.path)}?ref=${encodeURIComponent(branch)}`
     );
     const relativePath = rootPath ? entry.path.slice(prefix.length) : entry.path;
-    files.push({ path: relativePath, content: decodeBase64(data.content) });
+    if (TEXT_FILE_PATTERN.test(entry.path)) {
+      textFiles.push({ path: relativePath, content: decodeBase64(data.content) });
+    } else {
+      const bytes = decodeBase64Bytes(data.content);
+      const storageId = await ctx.storage.store(
+        new Blob([bytes], { type: getContentType(entry.path) })
+      );
+      binaryFiles.push({ path: relativePath, storageId });
+    }
   }
-  return files;
+  return { textFiles, binaryFiles };
 }
 
 async function commitFiles(

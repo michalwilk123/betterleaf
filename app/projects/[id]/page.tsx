@@ -334,6 +334,9 @@ export default function EditorPage() {
 
   const activeFile = files?.find((f) => f._id === activeFileId) ?? null;
   const activeFileName = activeFile?.name ?? "";
+  const accessLevel = project?.accessLevel;
+  const canEdit = accessLevel === "owner" || accessLevel === "editor" || accessLevel === "public-editor";
+  const isOwner = accessLevel === "owner";
   const visibleFiles = useMemo(
     () => (files ?? []).filter((f) => !f.name.endsWith("/.gitkeep")),
     [files]
@@ -480,6 +483,20 @@ export default function EditorPage() {
       setSaving(false);
     }
   }, [activeFileId, activeFileName, content, project, updateFileContent, commitProject]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (canEdit && activeFile && !isBinaryFile(activeFileName) && dirty && !saving) {
+          void save();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeFile, activeFileName, canEdit, dirty, save, saving]);
 
   const compile = useCallback(async (forceRecompile = false) => {
     if (!files || files.length === 0 || !entrypointFile || !project) return;
@@ -877,10 +894,6 @@ export default function EditorPage() {
       </div>
     );
   }
-
-  const accessLevel = project.accessLevel;
-  const canEdit = accessLevel === "owner" || accessLevel === "editor" || accessLevel === "public-editor";
-  const isOwner = accessLevel === "owner";
 
   return (
     <div className="flex flex-col h-screen bg-background">
