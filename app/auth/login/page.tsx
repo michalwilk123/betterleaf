@@ -2,18 +2,21 @@
 
 import { AuthCardShell } from "@/components/auth/auth-card-shell";
 import { GoogleLoginButton } from "@/components/auth/social-login-button";
+import { RedirectIfAuthed } from "@/app/_components/AuthGate";
 
 export default function LoginPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-sm">
-        <AuthCardShell
-          title="Log in to BetterLeaf"
-          description="Sign in with your Google account to continue."
-        >
-          <GoogleLoginButton />
-        </AuthCardShell>
+    <RedirectIfAuthed>
+      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+        <div className="w-full max-w-sm">
+          <AuthCardShell
+            title="Log in to BetterLeaf"
+            description="Sign in with your Google account to continue."
+          >
+            <GoogleLoginButton />
+          </AuthCardShell>
+        </div>
       </div>
-    </div>
+    </RedirectIfAuthed>
   );
 }

@@ -3,10 +3,11 @@
 import React, { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { authClient } from "@/lib/auth-client";
+import { RequireAuth } from "@/app/_components/AuthGate";
 import {
   Leaf,
   Search,
@@ -155,7 +156,7 @@ function PreviewPdfIconButton({
   );
 }
 
-export default function ProjectsPage() {
+function ProjectsContent() {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
@@ -168,15 +169,13 @@ export default function ProjectsPage() {
     name: string;
   } | null>(null);
 
-  const { data: session, isPending } = authClient.useSession();
+  const { data: session } = authClient.useSession();
+  const { isAuthenticated } = useConvexAuth();
 
-  useEffect(() => {
-    if (!isPending && !session) {
-      router.replace("/auth/login");
-    }
-  }, [isPending, session, router]);
-
-  const projects = useQuery(api.projects.list);
+  const projects = useQuery(
+    api.projects.list,
+    isAuthenticated ? {} : "skip"
+  );
   const removeProject = useMutation(api.projects.remove);
   const resolvePendingInvites = useMutation(api.members.resolvePendingInvites);
 
@@ -249,14 +248,6 @@ export default function ProjectsPage() {
   const userName = session?.user?.name ?? "User";
   const userEmail = session?.user?.email ?? "";
   const initials = getInitials(userName);
-
-  if (isPending || !session) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
 
   if (projects === undefined) {
     return (
@@ -552,6 +543,14 @@ export default function ProjectsPage() {
         />
       </div>
     </TooltipProvider>
+  );
+}
+
+export default function ProjectsPage() {
+  return (
+    <RequireAuth>
+      <ProjectsContent />
+    </RequireAuth>
   );
 }
 

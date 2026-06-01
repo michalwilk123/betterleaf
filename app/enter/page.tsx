@@ -1,19 +1,19 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { authClient } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
+import { useConvexAuth } from "convex/react";
 import { Loader2 } from "lucide-react";
 
 export default function Enter() {
   const router = useRouter();
-  const { data: session, isPending } = authClient.useSession();
+  const { isLoading, isAuthenticated } = useConvexAuth();
 
   useEffect(() => {
-    if (!isPending) {
-      router.replace(session ? "/projects" : "/auth/login");
+    if (!isLoading) {
+      router.replace(isAuthenticated ? "/projects" : "/auth/login");
     }
-  }, [isPending, session, router]);
+  }, [isLoading, isAuthenticated, router]);
 
   return (
     <div className="flex h-screen items-center justify-center">
