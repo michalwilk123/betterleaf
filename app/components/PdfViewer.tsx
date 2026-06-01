@@ -24,12 +24,20 @@ export default function PdfViewer({ pdfUrl }: { pdfUrl?: string }) {
   const [scale, setScale] = useState(DEFAULT_SCALE);
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const lastPageRef = useRef<number>(1);
+  const pendingScrollPageRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    lastPageRef.current = currentPage;
+  }, [currentPage]);
 
   const onDocumentLoadSuccess = useCallback(
     ({ numPages: n }: { numPages: number }) => {
       setNumPages(n);
-      setRenderedPages(Math.min(n, PAGE_BATCH_SIZE));
-      setCurrentPage(1);
+      const target = Math.min(Math.max(lastPageRef.current, 1), n);
+      setRenderedPages(Math.min(n, Math.max(PAGE_BATCH_SIZE, target)));
+      setCurrentPage(target);
+      pendingScrollPageRef.current = target > 1 ? target : null;
     },
     []
   );
@@ -65,7 +73,18 @@ export default function PdfViewer({ pdfUrl }: { pdfUrl?: string }) {
   }, [numPages, scale]);
 
   useEffect(() => {
-    if (numPages === 0 || renderedPages >= numPages) return;
+    if (numPages === 0) return;
+
+    const pending = pendingScrollPageRef.current;
+    if (pending !== null && pending <= renderedPages) {
+      const el = pageRefs.current.get(pending);
+      if (el) {
+        el.scrollIntoView({ block: "start", behavior: "auto" });
+        pendingScrollPageRef.current = null;
+      }
+    }
+
+    if (renderedPages >= numPages) return;
     const timeoutId = window.setTimeout(() => {
       setRenderedPages((prev) => Math.min(numPages, prev + PAGE_BATCH_SIZE));
     }, 0);

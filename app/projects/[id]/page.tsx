@@ -15,6 +15,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import type { Monaco } from "@monaco-editor/react";
+import type { editor as monacoEditor } from "monaco-editor";
 import { useAction, useQuery, useMutation, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -238,6 +239,22 @@ export default function EditorPage() {
   // Options modal
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [editorOptions, setEditorOptions] = useState<EditorOptions>(() => loadEditorOptions());
+
+  // Monaco editor instance — used to reset scroll/cursor on file switch
+  const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
+  const handleEditorMount = useCallback(
+    (editor: monacoEditor.IStandaloneCodeEditor) => {
+      editorRef.current = editor;
+    },
+    []
+  );
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !activeFileId) return;
+    editor.setScrollPosition({ scrollTop: 0, scrollLeft: 0 });
+    editor.setPosition({ lineNumber: 1, column: 1 });
+  }, [activeFileId]);
 
   // Upload
   const [dragActive, setDragActive] = useState(false);
@@ -1381,6 +1398,7 @@ export default function EditorPage() {
               ) : activeFile ? (
                 <Editor
                   beforeMount={handleEditorBeforeMount}
+                  onMount={handleEditorMount}
                   theme="vs"
                   language={langFromFilename(activeFileName)}
                   value={content}
