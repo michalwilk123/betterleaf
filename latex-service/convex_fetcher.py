@@ -79,6 +79,45 @@ def check_cache(project_id: str, zip_hash: str) -> dict | None:
     )
 
 
+def fetch_build_artifacts(project_id: str) -> tuple[bytes, str] | None:
+    """Fetch the persisted build-artifact tarball for a project.
+
+    Returns (tar_bytes, compiler) or None if there is no stored artifact.
+    """
+    client = _get_client()
+    artifact = client.query(
+        "service:getBuildArtifacts", {"projectId": project_id}
+    )
+    if not artifact or not artifact.get("tarUrl"):
+        return None
+
+    with httpx.Client() as http:
+        response = http.get(artifact["tarUrl"])
+        response.raise_for_status()
+
+    return response.content, artifact["compiler"]
+
+
+def upload_and_cache_artifacts(tar_bytes: bytes, project_id: str, compiler: str) -> None:
+    """Upload the build-artifact tarball to Convex storage and save the record."""
+    client = _get_client()
+    upload_url = client.mutation("service:generateUploadUrl", {})
+
+    with httpx.Client() as http:
+        upload_res = http.post(
+            upload_url,
+            content=tar_bytes,
+            headers={"Content-Type": "application/gzip"},
+        )
+        upload_res.raise_for_status()
+        storage_id = upload_res.json()["storageId"]
+
+    client.mutation(
+        "service:saveBuildArtifacts",
+        {"projectId": project_id, "storageId": storage_id, "compiler": compiler},
+    )
+
+
 def upload_and_cache(pdf_bytes: bytes, project_id: str, zip_hash: str) -> None:
     """Upload PDF to Convex storage and save the compilation record."""
     client = _get_client()

@@ -265,6 +265,16 @@ export const remove = mutation({
       await ctx.db.delete(output._id);
     }
 
+    // Delete build artifacts and their stored tar blobs
+    const artifacts = await ctx.db
+      .query("buildArtifacts")
+      .withIndex("by_projectId", (q) => q.eq("projectId", projectId))
+      .collect();
+    for (const artifact of artifacts) {
+      await ctx.storage.delete(artifact.storageId);
+      await ctx.db.delete(artifact._id);
+    }
+
     // Delete project
     await ctx.db.delete(projectId);
   },

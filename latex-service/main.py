@@ -217,6 +217,18 @@ async def compile_project(
     except Exception as e:
         log.warning("Cache check failed for project %s: %s — proceeding to compile", project_id, e)
 
+    # Fetch the persisted build dir (if any) to seed an incremental rebuild.
+    # Only reuse it when the stored compiler matches (aux files are engine-specific).
+    artifact_tar = None
+    try:
+        artifact = await asyncio.to_thread(convex_fetcher.fetch_build_artifacts, project_id)
+        if artifact and artifact[1] == compiler:
+            artifact_tar = artifact[0]
+    except Exception as e:
+        log.warning("Failed to fetch build artifacts for project %s: %s — compiling clean", project_id, e)
+
+    source_names = [f["name"] for f in files]
+
     # Submit to queue
     client_id = request.client.host if request.client else "unknown"
     loop = asyncio.get_event_loop()
@@ -226,6 +238,8 @@ async def compile_project(
         timeout=timeout,
         compiler=compiler,
         halt_on_error=halt_on_error,
+        artifact_tar=artifact_tar,
+        source_names=source_names,
         future=loop.create_future(),
     )
 
@@ -238,7 +252,7 @@ async def compile_project(
             content={"error": "queue_full", "detail": "Too many pending compilations"},
         )
 
-    log.info("Job submitted for client=%s project=%s work_dir=%s", client_id, project_id, work_dir)
+    log.info("Job submitted for client=%s project=%s work_dir=%s restore=%s", client_id, project_id, work_dir, bool(artifact_tar))
 
     result = await job.future
 
@@ -256,6 +270,16 @@ async def compile_project(
                 convex_fetcher.upload_and_cache, result.pdf_bytes, project_id, zip_hash
             )
         )
+        # Fire-and-forget: persist the build dir for the next incremental compile
+        if result.artifact_tar:
+            asyncio.create_task(
+                asyncio.to_thread(
+                    convex_fetcher.upload_and_cache_artifacts,
+                    result.artifact_tar,
+                    project_id,
+                    compiler,
+                )
+            )
         return Response(
             content=result.pdf_bytes,
             media_type="application/pdf",

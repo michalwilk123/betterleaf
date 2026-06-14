@@ -45,6 +45,17 @@ export default defineSchema({
     .index("by_project_and_hash", ["projectId", "zipHash"])
     .index("by_projectId", ["projectId"]),
 
+  // Persisted latexmk build directory (.aux/.bbl/.toc/.fdb_latexmk/...) as a single
+  // gzipped tar blob per project, used to seed incremental recompiles. Kept out of
+  // projectFiles so it never shows in the file tree, syncs to GitHub, or counts toward
+  // the size limit.
+  buildArtifacts: defineTable({
+    projectId: v.id("projects"),
+    storageId: v.id("_storage"),
+    compiler: v.union(v.literal("pdflatex"), v.literal("xelatex"), v.literal("lualatex")),
+    createdAt: v.number(),
+  }).index("by_projectId", ["projectId"]),
+
   pendingInvites: defineTable({
     projectId: v.id("projects"),
     email: v.string(),

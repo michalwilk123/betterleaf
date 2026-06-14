@@ -69,6 +69,58 @@ export const generateUploadUrl = internalMutation({
   },
 });
 
+export const getBuildArtifacts = internalQuery({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const artifact = await ctx.db
+      .query("buildArtifacts")
+      .withIndex("by_projectId", (q) => q.eq("projectId", projectId))
+      .first();
+    if (!artifact) return null;
+
+    const tarUrl = await ctx.storage.getUrl(artifact.storageId);
+    if (!tarUrl) return null;
+
+    return { tarUrl, compiler: artifact.compiler };
+  },
+});
+
+export const saveBuildArtifacts = internalMutation({
+  args: {
+    projectId: v.id("projects"),
+    storageId: v.id("_storage"),
+    compiler: v.union(
+      v.literal("pdflatex"),
+      v.literal("xelatex"),
+      v.literal("lualatex")
+    ),
+  },
+  handler: async (ctx, { projectId, storageId, compiler }) => {
+    const existing = await ctx.db
+      .query("buildArtifacts")
+      .withIndex("by_projectId", (q) => q.eq("projectId", projectId))
+      .first();
+
+    if (existing) {
+      // Tolerant delete: a concurrent compile may have already removed this blob.
+      try {
+        await ctx.storage.delete(existing.storageId);
+      } catch {
+        // already gone — ignore
+      }
+      await ctx.db.patch(existing._id, { storageId, compiler, createdAt: Date.now() });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("buildArtifacts", {
+      projectId,
+      storageId,
+      compiler,
+      createdAt: Date.now(),
+    });
+  },
+});
+
 export const saveCompilation = internalMutation({
   args: {
     projectId: v.id("projects"),

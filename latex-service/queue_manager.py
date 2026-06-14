@@ -17,6 +17,8 @@ class Job:
     timeout: int
     compiler: str = "pdflatex"
     halt_on_error: bool = False
+    artifact_tar: bytes | None = None
+    source_names: list[str] = field(default_factory=list)
     future: asyncio.Future[CompileResult] = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
 
@@ -88,6 +90,8 @@ class QueueManager:
                 job.timeout,
                 job.compiler,
                 job.halt_on_error,
+                job.artifact_tar,
+                job.source_names,
             )
             job.future.set_result(result)
         except Exception as e:
