@@ -558,9 +558,10 @@ export default function EditorPage() {
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         console.error("[compile] error body:", JSON.stringify(body));
-        const logTail = body?.log ?? body?.error ?? "Unknown compilation error";
-        toast.error("Compilation failed", {
-          description: logTail.slice(0, 200),
+        const message = body?.message ?? body?.error ?? "Compilation failed";
+        const details = body?.log && body.log !== message ? body.log : null;
+        toast.error(message, {
+          description: details?.slice(0, 200),
           duration: 8000,
         });
         return;
