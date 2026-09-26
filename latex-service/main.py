@@ -1,8 +1,13 @@
 import asyncio
+import gzip
+import io
 import logging
+import math
 import os
+import posixpath
 import secrets
 import shutil
+import subprocess
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -49,7 +54,68 @@ app.add_middleware(
 )
 
 
-PROTECTED_PATHS = {"/compile", "/compile-project"}
+PROTECTED_PATHS = {"/compile", "/compile-project", "/synctex"}
+
+
+def _find_source_line(
+    synctex_bytes: bytes,
+    entrypoint: str,
+    source_names: set[str],
+    page: int,
+    x: float,
+    y: float,
+) -> dict[str, str | int] | None:
+    """Run native SyncTeX against a temporary map and validate its source match."""
+    stem = Path(entrypoint).stem
+    with tempfile.TemporaryDirectory(prefix="synctex-") as tmp:
+        output = Path(tmp) / f"{stem}.pdf"
+        output.touch()
+        output.with_suffix(".synctex.gz").write_bytes(synctex_bytes)
+        result = subprocess.run(
+            ["synctex", "edit", "-o", f"{page}:{x}:{y}:{output}"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=5,
+            cwd=tmp,
+        )
+
+    if result.returncode != 0:
+        return None
+    input_name = None
+    line = None
+    for output_line in result.stdout.splitlines():
+        if output_line.startswith("Input:"):
+            input_name = output_line.removeprefix("Input:")
+        elif output_line.startswith("Line:"):
+            try:
+                line = int(output_line.removeprefix("Line:"))
+            except ValueError:
+                return None
+        if input_name is not None and line is not None:
+            break
+
+    if not input_name or line is None or line < 1:
+        return None
+    if "\\" in input_name or "\x00" in input_name:
+        return None
+    if posixpath.isabs(input_name):
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(synctex_bytes)) as map_file:
+                map_file.readline(8192)  # SyncTeX version
+                main_input = map_file.readline(8192).decode("utf-8", errors="replace")
+            if not main_input.startswith("Input:1:"):
+                return None
+            original_main = posixpath.normpath(main_input.removeprefix("Input:1:").strip())
+            if not posixpath.isabs(original_main) or posixpath.basename(original_main) != posixpath.basename(entrypoint):
+                return None
+            input_name = posixpath.relpath(input_name, posixpath.dirname(original_main))
+        except (OSError, EOFError, ValueError):
+            return None
+    path = posixpath.normpath(posixpath.join(posixpath.dirname(entrypoint), input_name))
+    if path.startswith("../") or path in ("..", ".") or path not in source_names:
+        return None
+    return {"path": path, "line": line}
 
 
 @app.middleware("http")
@@ -68,6 +134,55 @@ async def log_and_auth(request: Request, call_next):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/synctex")
+async def synctex(
+    project_id: str = Form(...),
+    zip_hash: str = Form(...),
+    page: int = Form(...),
+    x: float = Form(...),
+    y: float = Form(...),
+):
+    if (
+        page < 1
+        or page > 10000
+        or not math.isfinite(x)
+        or not math.isfinite(y)
+        or not 0 <= x <= 100000
+        or not 0 <= y <= 100000
+    ):
+        return JSONResponse(status_code=400, content={"error": "invalid_coordinates"})
+
+    try:
+        map_record = await asyncio.to_thread(
+            convex_fetcher.get_synctex_by_hash, project_id, zip_hash
+        )
+        if not map_record:
+            return JSONResponse(status_code=404, content={"error": "synctex_not_found"})
+        project = await asyncio.to_thread(convex_fetcher.fetch_project, project_id)
+    except Exception as e:
+        log.error("Failed to fetch SyncTeX data for project %s: %s", project_id, e)
+        return JSONResponse(status_code=502, content={"error": "synctex_fetch_failed"})
+
+    synctex_bytes, entrypoint = map_record
+    source_names = {file["name"] for file in project["files"]}
+    try:
+        match = await asyncio.to_thread(
+            _find_source_line,
+            synctex_bytes,
+            entrypoint,
+            source_names,
+            page,
+            x,
+            y,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log.error("SyncTeX lookup failed for project %s: %s", project_id, e)
+        return JSONResponse(status_code=502, content={"error": "synctex_lookup_failed"})
+    if not match:
+        return JSONResponse(status_code=404, content={"error": "source_not_found"})
+    return match
 
 
 @app.post("/compile")
@@ -212,7 +327,10 @@ async def compile_project(
             return Response(
                 content=pdf_response.content,
                 media_type="application/pdf",
-                headers={"Content-Disposition": "inline; filename=output.pdf"},
+                headers={
+                    "Content-Disposition": "inline; filename=output.pdf",
+                    "X-Build-Hash": zip_hash,
+                },
             )
     except Exception as e:
         log.warning("Cache check failed for project %s: %s — proceeding to compile", project_id, e)
@@ -264,12 +382,23 @@ async def compile_project(
     )
 
     if result.success:
-        # Fire-and-forget: cache PDF in Convex
-        asyncio.create_task(
-            asyncio.to_thread(
-                convex_fetcher.upload_and_cache, result.pdf_bytes, project_id, zip_hash
-            )
-        )
+        headers = {"Content-Disposition": "inline; filename=output.pdf"}
+        if result.synctex_bytes:
+            try:
+                await asyncio.to_thread(
+                    convex_fetcher.upload_and_cache,
+                    result.pdf_bytes,
+                    result.synctex_bytes,
+                    project_id,
+                    zip_hash,
+                    entrypoint,
+                    compiler,
+                )
+                headers["X-Build-Hash"] = zip_hash
+            except Exception as e:
+                log.error("Failed to cache compilation for project %s: %s", project_id, e)
+        else:
+            log.error("Compilation produced no SyncTeX map for project %s", project_id)
         # Fire-and-forget: persist the build dir for the next incremental compile
         if result.artifact_tar:
             asyncio.create_task(
@@ -283,7 +412,7 @@ async def compile_project(
         return Response(
             content=result.pdf_bytes,
             media_type="application/pdf",
-            headers={"Content-Disposition": "inline; filename=output.pdf"},
+            headers=headers,
         )
     else:
         return JSONResponse(

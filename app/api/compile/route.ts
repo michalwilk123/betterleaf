@@ -81,11 +81,13 @@ export async function POST(request: NextRequest) {
   if (contentType.includes("application/pdf")) {
     const pdfBytes = await response.arrayBuffer();
     console.log("[compile/route] PDF received, size:", pdfBytes.byteLength);
+    const buildHash = response.headers.get("X-Build-Hash");
     return new NextResponse(pdfBytes, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": "inline; filename=output.pdf",
+        ...(buildHash ? { "X-Build-Hash": buildHash } : {}),
       },
     });
   }

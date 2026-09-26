@@ -40,6 +40,9 @@ export default defineSchema({
     projectId: v.id("projects"),
     zipHash: v.string(),
     storageId: v.id("_storage"),
+    synctexStorageId: v.optional(v.id("_storage")),
+    entrypoint: v.optional(v.string()),
+    compiler: v.optional(v.union(v.literal("pdflatex"), v.literal("xelatex"), v.literal("lualatex"))),
     createdAt: v.number(),
   })
     .index("by_project_and_hash", ["projectId", "zipHash"])

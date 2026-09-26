@@ -180,8 +180,6 @@ export default function EditorPage() {
   const renameFileMut = useMutation(api.files.rename);
   const removeFile = useMutation(api.files.remove);
   const setEntrypoint = useMutation(api.projects.setEntrypoint);
-  const generateCompilationUploadUrl = useMutation(api.compilations.generateUploadUrl);
-  const saveCompilation = useMutation(api.compilations.save);
   const generateFileUploadUrl = useMutation(api.files.generateUploadUrl);
   const createManyText = useMutation(api.files.createManyText);
   const createManyBinary = useMutation(api.files.createManyBinary);
@@ -207,9 +205,10 @@ export default function EditorPage() {
   const [compiling, setCompiling] = useState(false);
   const [syncingGithub, setSyncingGithub] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | undefined>(undefined);
+  const [displayedBuild, setDisplayedBuild] = useState<{ sourceHash: string; zipHash: string } | null>(null);
   const [fromCache, setFromCache] = useState(false);
   const [showCachedNotice, setShowCachedNotice] = useState(false);
-  const lastCompileRef = useRef<{ hash: string; pdfUrl: string } | null>(null);
+  const lastCompileRef = useRef<{ sourceHash: string; zipHash: string | null; pdfUrl: string } | null>(null);
 
   useEffect(() => {
     if (!fromCache) return;
@@ -246,9 +245,27 @@ export default function EditorPage() {
 
   // Monaco editor instance — used to reset scroll/cursor on file switch
   const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
+  const pendingRevealRef = useRef<{ fileId: Id<"projectFiles">; line: number } | null>(null);
+  const revealPendingLine = useCallback(() => {
+    const editor = editorRef.current;
+    const pending = pendingRevealRef.current;
+    if (!editor || !pending || pending.fileId !== activeFileId) return;
+    const model = editor.getModel();
+    if (!model || model.getValue() !== content) return;
+    const line = Math.min(Math.max(pending.line, 1), model.getLineCount());
+    editor.setPosition({ lineNumber: line, column: 1 });
+    editor.revealLineInCenter(line);
+    editor.focus();
+    pendingRevealRef.current = null;
+  }, [activeFileId, content]);
+  const revealPendingLineRef = useRef(revealPendingLine);
+  useEffect(() => {
+    revealPendingLineRef.current = revealPendingLine;
+  }, [revealPendingLine]);
   const handleEditorMount = useCallback(
     (editor: monacoEditor.IStandaloneCodeEditor) => {
       editorRef.current = editor;
+      requestAnimationFrame(() => revealPendingLineRef.current());
     },
     []
   );
@@ -259,6 +276,11 @@ export default function EditorPage() {
     editor.setScrollPosition({ scrollTop: 0, scrollLeft: 0 });
     editor.setPosition({ lineNumber: 1, column: 1 });
   }, [activeFileId]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(revealPendingLine);
+    return () => cancelAnimationFrame(frame);
+  }, [revealPendingLine]);
 
   // Upload
   const [dragActive, setDragActive] = useState(false);
@@ -288,6 +310,29 @@ export default function EditorPage() {
   useEffect(() => {
     setOptimisticEntrypointFileId(null);
   }, [project?.entrypointFileId, project?._id]);
+
+  const navigationStateRef = useRef({
+    dirty,
+    saving,
+    displayedBuild,
+    files,
+    activeFileId,
+    content,
+    entrypointName: entrypointFile?.name,
+    projectId: project?._id,
+  });
+  useEffect(() => {
+    navigationStateRef.current = {
+      dirty,
+      saving,
+      displayedBuild,
+      files,
+      activeFileId,
+      content,
+      entrypointName: entrypointFile?.name,
+      projectId: project?._id,
+    };
+  }, [dirty, saving, displayedBuild, files, activeFileId, content, entrypointFile?.name, project?._id]);
 
   // Sync project name from query
   useEffect(() => {
@@ -543,8 +588,11 @@ export default function EditorPage() {
       const hash = await computeContentHash(files, activeFileId, content, entrypointFile.name);
 
       // Session-local cache hit
-      if (!forceRecompile && lastCompileRef.current?.hash === hash) {
+      if (!forceRecompile && lastCompileRef.current?.sourceHash === hash) {
         setPdfUrl(lastCompileRef.current.pdfUrl);
+        setDisplayedBuild(lastCompileRef.current.zipHash
+          ? { sourceHash: hash, zipHash: lastCompileRef.current.zipHash }
+          : null);
         setFromCache(true);
         setCompiling(false);
         return;
@@ -557,7 +605,8 @@ export default function EditorPage() {
         });
         if (cachedOutput?.pdfUrl) {
           setPdfUrl(cachedOutput.pdfUrl);
-          lastCompileRef.current = { hash, pdfUrl: cachedOutput.pdfUrl };
+          setDisplayedBuild({ sourceHash: hash, zipHash: hash });
+          lastCompileRef.current = { sourceHash: hash, zipHash: hash, pdfUrl: cachedOutput.pdfUrl };
           setFromCache(true);
           setCompiling(false);
           const panel = pdfPanelRef.current;
@@ -585,6 +634,7 @@ export default function EditorPage() {
       }
 
       const pdfBlob = await res.blob();
+      const zipHash = res.headers.get("X-Build-Hash");
       const previousPdfUrl = lastCompileRef.current?.pdfUrl;
       if (previousPdfUrl?.startsWith("blob:")) {
         URL.revokeObjectURL(previousPdfUrl);
@@ -592,29 +642,10 @@ export default function EditorPage() {
       const url = URL.createObjectURL(pdfBlob);
       setFromCache(false);
       setPdfUrl(url);
-      lastCompileRef.current = { hash, pdfUrl: url };
+      setDisplayedBuild(zipHash ? { sourceHash: hash, zipHash } : null);
+      lastCompileRef.current = { sourceHash: hash, zipHash, pdfUrl: url };
       const panel = pdfPanelRef.current;
       if (pdfCollapsed && panel) panel.expand();
-
-      // Upload PDF to Convex storage for caching
-      try {
-        const uploadUrl = await generateCompilationUploadUrl({ projectId: project._id });
-        const uploadRes = await fetch(uploadUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/pdf" },
-          body: pdfBlob,
-        });
-        if (uploadRes.ok) {
-          const { storageId } = await uploadRes.json();
-          await saveCompilation({
-            projectId: project._id,
-            zipHash: hash,
-            storageId,
-          });
-        }
-      } catch {
-        // Caching failure doesn't break the experience
-      }
     } finally {
       setCompiling(false);
     }
@@ -629,9 +660,84 @@ export default function EditorPage() {
     project,
     convex,
     pdfPanelRef,
-    generateCompilationUploadUrl,
-    saveCompilation,
   ]);
+
+  const handlePdfTextDoubleClick = useCallback(async (position: { page: number; x: number; y: number }) => {
+    const state = navigationStateRef.current;
+    if (!state.projectId || !state.files || !state.entrypointName) return;
+    if (!state.displayedBuild) {
+      toast.error("Source navigation is unavailable for this PDF");
+      return;
+    }
+    if (state.dirty || state.saving) {
+      toast.warning("Save and recompile before navigating from the PDF");
+      return;
+    }
+
+    try {
+      const sourceHash = await computeContentHash(
+        state.files, state.activeFileId, state.content, state.entrypointName
+      );
+      if (sourceHash !== state.displayedBuild.sourceHash) {
+        toast.warning("Recompile before navigating from the PDF");
+        return;
+      }
+
+      const response = await fetch("/api/synctex", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: state.projectId,
+          zipHash: state.displayedBuild.zipHash,
+          ...position,
+        }),
+      });
+      if (!response.ok) {
+        toast.error("No source location found for this text");
+        return;
+      }
+
+      const location: unknown = await response.json();
+      if (
+        !location || typeof location !== "object" ||
+        !("path" in location) || typeof location.path !== "string" ||
+        !("line" in location) || !Number.isInteger(location.line) || Number(location.line) < 1
+      ) {
+        toast.error("No source location found for this text");
+        return;
+      }
+
+      const latest = navigationStateRef.current;
+      if (latest.dirty || latest.saving || latest.projectId !== state.projectId ||
+        latest.displayedBuild?.zipHash !== state.displayedBuild.zipHash ||
+        !latest.files || !latest.entrypointName
+      ) {
+        toast.warning("Save and recompile before navigating from the PDF");
+        return;
+      }
+      const latestHash = await computeContentHash(
+        latest.files, latest.activeFileId, latest.content, latest.entrypointName
+      );
+      if (latestHash !== state.displayedBuild.sourceHash) {
+        toast.warning("Recompile before navigating from the PDF");
+        return;
+      }
+      if (navigationStateRef.current.dirty ||
+        navigationStateRef.current.displayedBuild?.zipHash !== state.displayedBuild.zipHash
+      ) return;
+
+      const file = latest.files.find((candidate) => candidate.name === location.path && candidate.name.endsWith(".tex"));
+      if (!file) {
+        toast.error("Source file not found in this project");
+        return;
+      }
+      pendingRevealRef.current = { fileId: file._id, line: Number(location.line) };
+      openFile(file._id);
+      requestAnimationFrame(revealPendingLine);
+    } catch {
+      toast.error("Could not find the source location");
+    }
+  }, [openFile, revealPendingLine]);
 
   useEffect(() => {
     if (!compileAfterGithubSyncRef.current || !files || files.length === 0 || !entrypointFile) {
@@ -1450,6 +1556,7 @@ export default function EditorPage() {
                   language={langFromFilename(activeFileName)}
                   value={content}
                   onChange={(v) => {
+                    if (!canEdit) return;
                     setContent(v ?? "");
                     setDirty(true);
                   }}
@@ -1499,7 +1606,7 @@ export default function EditorPage() {
             }}
             id="pdf"
           >
-            <PdfViewer pdfUrl={pdfUrl} />
+            <PdfViewer pdfUrl={pdfUrl} onTextDoubleClick={handlePdfTextDoubleClick} />
           </Panel>
         </Group>
         </Panel>

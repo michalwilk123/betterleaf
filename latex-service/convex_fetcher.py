@@ -71,7 +71,7 @@ async def _download_binary(http: httpx.AsyncClient, file: dict, path: Path) -> N
 
 
 def check_cache(project_id: str, zip_hash: str) -> dict | None:
-    """Check if a compilation result is cached in Convex. Returns {pdfUrl} or None."""
+    """Check if a map-equipped compilation result is cached in Convex."""
     client = _get_client()
     return client.query(
         "service:getCompilationByHash",
@@ -118,21 +118,54 @@ def upload_and_cache_artifacts(tar_bytes: bytes, project_id: str, compiler: str)
     )
 
 
-def upload_and_cache(pdf_bytes: bytes, project_id: str, zip_hash: str) -> None:
-    """Upload PDF to Convex storage and save the compilation record."""
+def get_synctex_by_hash(project_id: str, zip_hash: str) -> tuple[bytes, str] | None:
+    """Fetch the SyncTeX map and entrypoint for an exact project build."""
     client = _get_client()
-    upload_url = client.mutation("service:generateUploadUrl", {})
+    record = client.query(
+        "service:getSynctexByHash", {"projectId": project_id, "zipHash": zip_hash}
+    )
+    if not record or not record.get("synctexUrl"):
+        return None
+
+    with httpx.Client(timeout=15) as http:
+        response = http.get(record["synctexUrl"])
+        response.raise_for_status()
+        if len(response.content) > 20 * 1024 * 1024:
+            raise ValueError("SyncTeX map is too large")
+    return response.content, record["entrypoint"]
+
+
+def upload_and_cache(
+    pdf_bytes: bytes,
+    synctex_bytes: bytes,
+    project_id: str,
+    zip_hash: str,
+    entrypoint: str,
+    compiler: str,
+) -> None:
+    """Upload PDF and SyncTeX together, then publish one compilation record."""
+    client = _get_client()
 
     with httpx.Client() as http:
-        upload_res = http.post(
-            upload_url,
-            content=pdf_bytes,
-            headers={"Content-Type": "application/pdf"},
-        )
-        upload_res.raise_for_status()
-        storage_id = upload_res.json()["storageId"]
+        def upload(data: bytes, content_type: str) -> str:
+            upload_url = client.mutation("service:generateUploadUrl", {})
+            upload_res = http.post(
+                upload_url, content=data, headers={"Content-Type": content_type}
+            )
+            upload_res.raise_for_status()
+            return upload_res.json()["storageId"]
+
+        storage_id = upload(pdf_bytes, "application/pdf")
+        synctex_storage_id = upload(synctex_bytes, "application/gzip")
 
     client.mutation(
         "service:saveCompilation",
-        {"projectId": project_id, "zipHash": zip_hash, "storageId": storage_id},
+        {
+            "projectId": project_id,
+            "zipHash": zip_hash,
+            "storageId": storage_id,
+            "synctexStorageId": synctex_storage_id,
+            "entrypoint": entrypoint,
+            "compiler": compiler,
+        },
     )

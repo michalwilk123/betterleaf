@@ -17,7 +17,13 @@ const ZOOM_MAX = 3.0;
 const DEFAULT_SCALE = 1.2;
 const PAGE_BATCH_SIZE = 6;
 
-export default function PdfViewer({ pdfUrl }: { pdfUrl?: string }) {
+export default function PdfViewer({
+  pdfUrl,
+  onTextDoubleClick,
+}: {
+  pdfUrl?: string;
+  onTextDoubleClick?: (position: { page: number; x: number; y: number }) => void;
+}) {
   const [numPages, setNumPages] = useState(0);
   const [renderedPages, setRenderedPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -160,6 +166,16 @@ export default function PdfViewer({ pdfUrl }: { pdfUrl?: string }) {
             <div
               key={i + 1}
               data-page={i + 1}
+              onDoubleClick={(event) => {
+                if (!onTextDoubleClick || !(event.target instanceof Element)) return;
+                if (!event.target.closest(".react-pdf__Page__textContent")) return;
+                const rect = event.currentTarget.getBoundingClientRect();
+                onTextDoubleClick({
+                  page: i + 1,
+                  x: (event.clientX - rect.left) / scale,
+                  y: (event.clientY - rect.top) / scale,
+                });
+              }}
               ref={(el) => {
                 if (el) pageRefs.current.set(i + 1, el);
                 else pageRefs.current.delete(i + 1);

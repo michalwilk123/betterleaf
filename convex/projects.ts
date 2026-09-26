@@ -262,6 +262,7 @@ export const remove = mutation({
       .collect();
     for (const output of outputs) {
       await ctx.storage.delete(output.storageId);
+      if (output.synctexStorageId) await ctx.storage.delete(output.synctexStorageId);
       await ctx.db.delete(output._id);
     }
 

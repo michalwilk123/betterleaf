@@ -47,18 +47,40 @@ export const getProjectWithFiles = internalQuery({
 export const getCompilationByHash = internalQuery({
   args: { projectId: v.id("projects"), zipHash: v.string() },
   handler: async (ctx, { projectId, zipHash }) => {
+    const project = await ctx.db.get(projectId);
+    if (!project) return null;
+
     const output = await ctx.db
       .query("compilationOutputs")
       .withIndex("by_project_and_hash", (q) =>
         q.eq("projectId", projectId).eq("zipHash", zipHash)
       )
       .first();
-    if (!output) return null;
+    if (!output?.synctexStorageId || !output.entrypoint ||
+        output.compiler !== (project.compiler ?? "pdflatex")) return null;
 
     const pdfUrl = await ctx.storage.getUrl(output.storageId);
     if (!pdfUrl) return null;
 
     return { pdfUrl };
+  },
+});
+
+export const getSynctexByHash = internalQuery({
+  args: { projectId: v.id("projects"), zipHash: v.string() },
+  handler: async (ctx, { projectId, zipHash }) => {
+    const output = await ctx.db
+      .query("compilationOutputs")
+      .withIndex("by_project_and_hash", (q) =>
+        q.eq("projectId", projectId).eq("zipHash", zipHash)
+      )
+      .first();
+    if (!output?.synctexStorageId || !output.entrypoint) return null;
+
+    const synctexUrl = await ctx.storage.getUrl(output.synctexStorageId);
+    if (!synctexUrl) return null;
+
+    return { synctexUrl, entrypoint: output.entrypoint };
   },
 });
 
@@ -126,8 +148,15 @@ export const saveCompilation = internalMutation({
     projectId: v.id("projects"),
     zipHash: v.string(),
     storageId: v.id("_storage"),
+    synctexStorageId: v.id("_storage"),
+    entrypoint: v.string(),
+    compiler: v.union(
+      v.literal("pdflatex"),
+      v.literal("xelatex"),
+      v.literal("lualatex")
+    ),
   },
-  handler: async (ctx, { projectId, zipHash, storageId }) => {
+  handler: async (ctx, { projectId, zipHash, storageId, synctexStorageId, entrypoint, compiler }) => {
     const existing = await ctx.db
       .query("compilationOutputs")
       .withIndex("by_project_and_hash", (q) =>
@@ -136,8 +165,17 @@ export const saveCompilation = internalMutation({
       .first();
 
     if (existing) {
-      await ctx.storage.delete(existing.storageId);
-      await ctx.db.patch(existing._id, { storageId, createdAt: Date.now() });
+      if (existing.storageId !== storageId) await ctx.storage.delete(existing.storageId);
+      if (existing.synctexStorageId && existing.synctexStorageId !== synctexStorageId) {
+        await ctx.storage.delete(existing.synctexStorageId);
+      }
+      await ctx.db.patch(existing._id, {
+        storageId,
+        synctexStorageId,
+        entrypoint,
+        compiler,
+        createdAt: Date.now(),
+      });
       return existing._id;
     }
 
@@ -145,6 +183,9 @@ export const saveCompilation = internalMutation({
       projectId,
       zipHash,
       storageId,
+      synctexStorageId,
+      entrypoint,
+      compiler,
       createdAt: Date.now(),
     });
   },

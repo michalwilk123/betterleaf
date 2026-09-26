@@ -21,6 +21,7 @@ class CompileResult:
     pdf_bytes: bytes | None
     log_tail: str
     artifact_tar: bytes | None = None
+    synctex_bytes: bytes | None = None
 
 
 def _fix_flat_file_references(work_path: Path) -> None:
@@ -192,6 +193,7 @@ def compile_latex(
     cmd = [
         "latexmk",
         engine_flag,
+        "-synctex=1",
         "-interaction=nonstopmode",
         "-outdir=.",
         entrypoint_file,
@@ -207,6 +209,7 @@ def compile_latex(
 
     pdf_name = entrypoint_rel.stem + ".pdf"
     pdf_path = compile_cwd / pdf_name
+    synctex_path = compile_cwd / (entrypoint_rel.stem + ".synctex.gz")
 
     # Restore a previous build dir for an incremental rebuild. Restore the aux
     # files first, then touch sources so they are strictly newest — this forces
@@ -254,6 +257,7 @@ def compile_latex(
             pdf_bytes=pdf_path.read_bytes(),
             log_tail="",
             artifact_tar=artifact_bytes,
+            synctex_bytes=synctex_path.read_bytes() if synctex_path.exists() else None,
         )
 
     # Collect log tail from the .log file or stdout/stderr
