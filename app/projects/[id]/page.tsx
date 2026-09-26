@@ -194,6 +194,7 @@ export default function EditorPage() {
 
   // Sidebar
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const sidebarPanelRef = usePanelRef();
 
   // Active file
   const [activeFileId, setActiveFileId] = useState<Id<"projectFiles"> | null>(null);
@@ -621,7 +622,7 @@ export default function EditorPage() {
       return;
     }
     compileAfterGithubSyncRef.current = false;
-    compile(true);
+    compile();
   }, [files, entrypointFile, compile]);
 
   const handleUpload = useCallback(
@@ -1023,12 +1024,19 @@ export default function EditorPage() {
       </header>
 
       {/* Body */}
-      <div className="flex flex-1 overflow-hidden">
+      <Group orientation="horizontal" className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <aside
-          className={`shrink-0 border-r border-border/60 bg-muted/30 flex flex-col transition-all duration-200 ease-in-out overflow-hidden ${
-            sidebarOpen ? "w-60" : "w-0"
-          }`}
+        <Panel
+          defaultSize="240px"
+          minSize="180px"
+          maxSize="480px"
+          collapsible
+          panelRef={sidebarPanelRef}
+          onResize={(size) => setSidebarOpen(size.asPercentage !== 0)}
+          id="files"
+          className="border-r border-border/60 bg-muted/30 flex flex-col overflow-hidden"
+          role="complementary"
+          aria-label="Project files"
           onDragOver={onDragOverSidebar}
           onDrop={onDropOnSidebar}
           onDragLeave={onDragLeaveSidebar}
@@ -1038,8 +1046,9 @@ export default function EditorPage() {
               Files
             </span>
             <button
-              onClick={() => setSidebarOpen(false)}
+              onClick={() => sidebarPanelRef.current?.collapse()}
               className="p-1 rounded hover:bg-accent/50 text-muted-foreground"
+              title="Hide files"
             >
               <PanelLeftClose className="h-4 w-4" />
             </button>
@@ -1338,20 +1347,23 @@ export default function EditorPage() {
               </button>
             </div>
           )}
-        </aside>
+        </Panel>
 
-        {/* Sidebar toggle (when collapsed) */}
-        {!sidebarOpen && (
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="shrink-0 flex items-center justify-center w-8 border-r border-border/60 hover:bg-accent/50 text-muted-foreground transition-colors"
-          >
-            <PanelLeftOpen className="h-4 w-4" />
-          </button>
-        )}
+        <Separator className={`shrink-0 transition-colors ${sidebarOpen ? "w-1.5 cursor-col-resize bg-border/30 hover:bg-primary/30" : "w-8 border-r border-border/60"}`}>
+          {!sidebarOpen && (
+            <button
+              onClick={() => sidebarPanelRef.current?.expand()}
+              className="w-full h-full flex items-center justify-center hover:bg-accent/50 text-muted-foreground"
+              title="Show files"
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </button>
+          )}
+        </Separator>
 
         {/* Editor + PDF panels */}
-        <Group orientation="horizontal" className="flex-1">
+        <Panel id="workspace">
+        <Group orientation="horizontal" className="h-full">
           {/* Editor panel */}
           <Panel defaultSize="50" minSize="30" id="editor">
             <div className="flex flex-col h-full">
@@ -1456,7 +1468,8 @@ export default function EditorPage() {
             <PdfViewer pdfUrl={pdfUrl} />
           </Panel>
         </Group>
-      </div>
+        </Panel>
+      </Group>
 
       <CreateFileModal
         open={createFileModal !== null}

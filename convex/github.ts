@@ -5,6 +5,7 @@ import { authComponent } from "./auth";
 import type { Id } from "./_generated/dataModel";
 import type { ActionCtx } from "./_generated/server";
 import { importPKCS8, SignJWT } from "jose";
+import pLimit from "p-limit";
 
 type GithubTextFile = {
   path: string;
@@ -472,23 +473,28 @@ async function readGithubFiles(
 ): Promise<{ textFiles: GithubTextFile[]; binaryFiles: GithubBinaryFile[] }> {
   const entries = await readGithubTreeEntries(token, owner, repo, branch, rootPath);
 
-  const textFiles: GithubTextFile[] = [];
-  const binaryFiles: GithubBinaryFile[] = [];
-  for (const entry of entries) {
+  const limit = pLimit(5);
+  const results = await Promise.all(entries.map((entry) => limit(async () => {
     const data = await githubFetch(
       token,
       `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(entry.path)}?ref=${encodeURIComponent(branch)}`
     );
     const relativePath = getGithubRelativePath(entry.path, rootPath);
     if (TEXT_FILE_PATTERN.test(entry.path)) {
-      textFiles.push({ path: relativePath, content: decodeBase64(data.content) });
-    } else {
-      const bytes = decodeBase64Bytes(data.content);
-      const storageId = await ctx.storage.store(
-        new Blob([bytes], { type: getContentType(entry.path) })
-      );
-      binaryFiles.push({ path: relativePath, storageId });
+      return { textFile: { path: relativePath, content: decodeBase64(data.content) } };
     }
+    const bytes = decodeBase64Bytes(data.content);
+    const storageId = await ctx.storage.store(
+      new Blob([bytes], { type: getContentType(entry.path) })
+    );
+    return { binaryFile: { path: relativePath, storageId } };
+  })));
+
+  const textFiles: GithubTextFile[] = [];
+  const binaryFiles: GithubBinaryFile[] = [];
+  for (const result of results) {
+    if (result.textFile) textFiles.push(result.textFile);
+    if (result.binaryFile) binaryFiles.push(result.binaryFile);
   }
   return { textFiles, binaryFiles };
 }
