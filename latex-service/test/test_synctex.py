@@ -51,6 +51,13 @@ class LookupSynctexTests(unittest.TestCase):
             match = main._find_source_line(map_bytes, "book/main.tex", {"book/sections/intro.tex"}, 1, 30, 50)
         self.assertEqual(match, {"path": "book/sections/intro.tex", "line": 42})
 
+    def test_flat_source_referenced_through_subdirectory_symlink(self):
+        map_bytes = gzip.compress(b"SyncTeX Version:1\nInput:1:/tmp/latex-123/book/./main.tex\n")
+        output = "Input:/tmp/latex-123/book/./sections/intro.tex\nLine:42\n"
+        with patch.object(main.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout=output)):
+            match = main._find_source_line(map_bytes, "book/main.tex", {"book/intro.tex"}, 1, 30, 50)
+        self.assertEqual(match, {"path": "book/intro.tex", "line": 42})
+
     def test_rejects_source_outside_project(self):
         for path in ("../../secret.tex", "/etc/passwd", "other.tex"):
             with self.subTest(path=path):

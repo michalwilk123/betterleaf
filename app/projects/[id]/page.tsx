@@ -726,7 +726,7 @@ export default function EditorPage() {
         navigationStateRef.current.displayedBuild?.zipHash !== state.displayedBuild.zipHash
       ) return;
 
-      const file = latest.files.find((candidate) => candidate.name === location.path && candidate.name.endsWith(".tex"));
+      const file = latest.files.find((candidate) => candidate.name === location.path && !isBinaryFile(candidate.name));
       if (!file) {
         toast.error("Source file not found in this project");
         return;

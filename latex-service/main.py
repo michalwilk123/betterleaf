@@ -113,8 +113,14 @@ def _find_source_line(
         except (OSError, EOFError, ValueError):
             return None
     path = posixpath.normpath(posixpath.join(posixpath.dirname(entrypoint), input_name))
-    if path.startswith("../") or path in ("..", ".") or path not in source_names:
+    if path.startswith("../") or path in ("..", "."):
         return None
+    if path not in source_names:
+        # The compiler may have created a subdirectory symlink to a flat source.
+        flat_path = posixpath.join(posixpath.dirname(entrypoint), posixpath.basename(path))
+        if flat_path not in source_names:
+            return None
+        path = flat_path
     return {"path": path, "line": line}
 
 
