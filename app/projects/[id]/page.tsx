@@ -25,6 +25,7 @@ import {
   Leaf,
   Folder,
   FolderOpen,
+  Search,
   Settings,
   Share2,
   Play,
@@ -52,6 +53,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { CreateFileModal } from "./_components/CreateFileModal";
+import { QuickOpen } from "./_components/QuickOpen";
 import { ShareModal } from "./_components/ShareModal";
 import { OptionsModal, loadEditorOptions, type EditorOptions, type CompileSettings } from "./_components/OptionsModal";
 import { toast } from "sonner";
@@ -195,6 +197,7 @@ export default function EditorPage() {
   // Sidebar
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const sidebarPanelRef = usePanelRef();
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
 
   // Active file
   const [activeFileId, setActiveFileId] = useState<Id<"projectFiles"> | null>(null);
@@ -515,6 +518,19 @@ export default function EditorPage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeFile, activeFileName, canEdit, dirty, save, saving]);
+
+  useEffect(() => {
+    const handleQuickOpen = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "p") {
+        if (createFileModal || shareOpen || optionsOpen) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setQuickOpenOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleQuickOpen, true);
+    return () => window.removeEventListener("keydown", handleQuickOpen, true);
+  }, [createFileModal, shareOpen, optionsOpen]);
 
   const compile = useCallback(async (forceRecompile = false) => {
     if (!files || files.length === 0 || !entrypointFile || !project) return;
@@ -915,7 +931,7 @@ export default function EditorPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className="relative flex flex-col h-screen bg-background">
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border/60 bg-white px-4">
         {/* Left */}
@@ -1023,6 +1039,14 @@ export default function EditorPage() {
         </div>
       </header>
 
+      {quickOpenOpen && (
+        <QuickOpen
+          files={visibleFiles}
+          onSelect={openFile}
+          onClose={() => setQuickOpenOpen(false)}
+        />
+      )}
+
       {/* Body */}
       <Group orientation="horizontal" className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
@@ -1045,13 +1069,23 @@ export default function EditorPage() {
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Files
             </span>
-            <button
-              onClick={() => sidebarPanelRef.current?.collapse()}
-              className="p-1 rounded hover:bg-accent/50 text-muted-foreground"
-              title="Hide files"
-            >
-              <PanelLeftClose className="h-4 w-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setQuickOpenOpen(true)}
+                className="p-1 rounded hover:bg-accent/50 text-muted-foreground"
+                title="Quick open (Ctrl+P or Cmd+P)"
+                aria-label="Quick open file"
+              >
+                <Search className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => sidebarPanelRef.current?.collapse()}
+                className="p-1 rounded hover:bg-accent/50 text-muted-foreground"
+                title="Hide files"
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
           {/* New file / folder buttons */}
