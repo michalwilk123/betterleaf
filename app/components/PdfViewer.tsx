@@ -53,7 +53,8 @@ export default function PdfViewer({
   const fitWidth = () => {
     if (!containerRef.current) return;
     const containerWidth = containerRef.current.clientWidth - 32;
-    setScale(containerWidth / 612);
+    const pageWidth = (pageRefs.current.get(currentPage)?.getBoundingClientRect().width ?? 612 * scale) / scale;
+    setScale(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, containerWidth / pageWidth)));
   };
 
   useEffect(() => {
@@ -155,7 +156,7 @@ export default function PdfViewer({
       {/* Scrollable pages */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-y-auto overflow-x-auto flex flex-col items-center gap-4 py-4 bg-muted/20"
+        className="flex-1 min-h-0 overflow-auto py-4 bg-muted/20"
       >
         <Document
           key={pdfUrl}
@@ -166,9 +167,13 @@ export default function PdfViewer({
             <div
               key={i + 1}
               data-page={i + 1}
+              onMouseDown={(event) => {
+                if (onTextDoubleClick && event.detail >= 2) event.preventDefault();
+              }}
               onDoubleClick={(event) => {
-                if (!onTextDoubleClick || !(event.target instanceof Element)) return;
-                if (!event.target.closest(".react-pdf__Page__textContent")) return;
+                if (!onTextDoubleClick) return;
+                event.preventDefault();
+                window.getSelection()?.removeAllRanges();
                 const rect = event.currentTarget.getBoundingClientRect();
                 onTextDoubleClick({
                   page: i + 1,
@@ -180,7 +185,7 @@ export default function PdfViewer({
                 if (el) pageRefs.current.set(i + 1, el);
                 else pageRefs.current.delete(i + 1);
               }}
-              className="shadow-md rounded-sm overflow-hidden"
+              className="w-max mx-auto shadow-md rounded-sm overflow-hidden"
               style={{ marginBottom: i + 1 === numPages ? 0 : pageGap }}
             >
               <Page pageNumber={i + 1} scale={scale} />

@@ -251,13 +251,13 @@ export default function EditorPage() {
     const pending = pendingRevealRef.current;
     if (!editor || !pending || pending.fileId !== activeFileId) return;
     const model = editor.getModel();
-    if (!model || model.getValue() !== content) return;
+    if (!model) return;
     const line = Math.min(Math.max(pending.line, 1), model.getLineCount());
     editor.setPosition({ lineNumber: line, column: 1 });
     editor.revealLineInCenter(line);
     editor.focus();
     pendingRevealRef.current = null;
-  }, [activeFileId, content]);
+  }, [activeFileId]);
   const revealPendingLineRef = useRef(revealPendingLine);
   useEffect(() => {
     revealPendingLineRef.current = revealPendingLine;
@@ -278,8 +278,14 @@ export default function EditorPage() {
   }, [activeFileId]);
 
   useEffect(() => {
-    const frame = requestAnimationFrame(revealPendingLine);
-    return () => cancelAnimationFrame(frame);
+    let revealFrame = 0;
+    const settleFrame = requestAnimationFrame(() => {
+      revealFrame = requestAnimationFrame(revealPendingLine);
+    });
+    return () => {
+      cancelAnimationFrame(settleFrame);
+      cancelAnimationFrame(revealFrame);
+    };
   }, [revealPendingLine]);
 
   // Upload
